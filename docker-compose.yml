@@ -1,0 +1,15 @@
+version: "3.8"
+
+services:
+  cve-feed:
+    build: .
+    container_name: cve-feed-explorer
+    ports:
+      - "8082:80"
+    restart: unless-stopped
+    # Optional: resource limits
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: "0.5"
