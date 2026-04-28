@@ -207,6 +207,39 @@ PYEOF
   rm -f "$RULES"
 }
 
+# ─── 6. CISA Known Exploited Vulnerabilities ─────────────────────
+fetch_kev() {
+  log "Fetching CISA KEV catalog..."
+
+  curl -sfL -o "$CACHE/kev_raw.json" "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json" || { log "ERROR: CISA KEV download failed"; return 1; }
+
+  python3 << 'PYEOF'
+import json
+
+with open("/var/cache/cve-data/kev_raw.json", encoding="utf-8", errors="replace") as f:
+    data = json.load(f)
+
+kev_map = {}
+for vuln in data.get("vulnerabilities", []):
+    cve = vuln.get("cveID", "")
+    if cve.startswith("CVE-"):
+        kev_map[cve] = {
+            "vendor": vuln.get("vendorProject", ""),
+            "product": vuln.get("product", ""),
+            "name": vuln.get("vulnerabilityName", ""),
+            "dateAdded": vuln.get("dateAdded", ""),
+            "dueDate": vuln.get("dueDate", ""),
+            "action": vuln.get("requiredAction", ""),
+            "ransomware": vuln.get("knownRansomwareCampaignUse", "Unknown")
+        }
+
+with open("/var/cache/cve-data/kev.json", "w") as f:
+    json.dump(kev_map, f, separators=(",", ":"))
+print(f"CISA KEV: {len(kev_map)} vulnerabilities cached")
+PYEOF
+  rm -f "$CACHE/kev_raw.json"
+}
+
 # ─── Run all fetchers ─────────────────────────────────────────────
 log "=== Starting data fetch ==="
 fetch_epss || log "EPSS fetch failed, continuing..."
@@ -214,4 +247,5 @@ fetch_nuclei || log "Nuclei fetch failed, continuing..."
 fetch_metasploit || log "Metasploit fetch failed, continuing..."
 fetch_exploitdb || log "ExploitDB fetch failed, continuing..."
 fetch_et_rules || log "ET rules fetch failed, continuing..."
+fetch_kev || log "CISA KEV fetch failed, continuing..."
 log "=== Data fetch complete ==="

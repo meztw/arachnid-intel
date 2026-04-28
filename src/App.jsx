@@ -1,268 +1,159 @@
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React,{useState,useEffect,useMemo,useCallback,useRef} from"react";
+const FEED="https://raw.githubusercontent.com/fedisecfeeds/fedisecfeeds.github.io/refs/heads/main/fedi_cve_feed.json";
+const T={bg:"#080c1a",bgC:"#0c1228",bgH:"#111936",bgX:"#0e1530",bd:"#1a2347",ac:"#2563eb",al:"#3b82f6",ag:"rgba(37,99,235,.12)",tx:"#c7d2e0",tm:"#5b6b82",td:"#3a4a63",wh:"#e8edf5",r:"#ef4444",o:"#f59e0b",y:"#eab308",g:"#22c55e",p:"#a855f7",cy:"#06b6d4"};
+const SV={CRITICAL:{bg:"rgba(239,68,68,.12)",bd:"#ef4444",tx:"#fca5a5",b2:"#dc2626"},HIGH:{bg:"rgba(245,158,11,.1)",bd:"#f59e0b",tx:"#fcd34d",b2:"#d97706"},MEDIUM:{bg:"rgba(234,179,8,.1)",bd:"#eab308",tx:"#fde047",b2:"#a16207"},LOW:{bg:"rgba(34,197,94,.1)",bd:"#22c55e",tx:"#86efac",b2:"#16a34a"},NONE:{bg:"rgba(91,107,130,.08)",bd:T.td,tx:T.tm,b2:T.td}};
+const sc=s=>SV[s?.toUpperCase()]||SV.NONE,eY=id=>{const m=id.match(/CVE-(\d{4})/);return m?+m[1]:0},strip=h=>h?h.replace(/<[^>]*>/g," ").replace(/\s+/g," ").trim():"",tA=d=>{if(!d)return"";const m=Math.floor((Date.now()-new Date(d))/6e4);if(m<60)return m+"m";const h=Math.floor(m/60);if(h<24)return h+"h";const dy=Math.floor(h/24);return dy<30?dy+"d":Math.floor(dy/30)+"mo"},eC=s=>s==null?T.td:s>=.5?T.r:s>=.15?T.o:s>=.05?T.y:T.g;
+async function fJ(u){try{const r=await fetch(u);if(!r.ok)throw 0;return await r.json()}catch{return null}}
+const FL=["ALL","CRITICAL","HIGH","MEDIUM","LOW"],PS=[5,10,15,30,50,100,"All"],RC={RETIRE:T.r,REVIEW:T.o,KEEP:T.g},SR={CRITICAL:4,HIGH:3,MEDIUM:2,LOW:1};
 
-const FEED_URL = "https://raw.githubusercontent.com/fedisecfeeds/fedisecfeeds.github.io/refs/heads/main/fedi_cve_feed.json";
+// ── Shared Components ──
+function Bdg({s}){const c=sc(s);return<span style={{display:"inline-block",padding:"2px 10px",borderRadius:4,background:c.b2,color:"#fff",fontSize:10,fontWeight:700,letterSpacing:".06em",textTransform:"uppercase"}}>{s||"N/A"}</span>}
+function CBar({v}){if(v==null)return<span style={{color:T.td}}>—</span>;const p=v/10*100,c=v>=9?T.r:v>=7?T.o:v>=4?T.y:T.g;return<div style={{display:"flex",alignItems:"center",gap:8}}><div style={{width:56,height:5,background:"rgba(255,255,255,.05)",borderRadius:3,overflow:"hidden"}}><div style={{width:p+"%",height:"100%",background:c,borderRadius:3}}/></div><span style={{color:c,fontSize:12,fontWeight:700,fontVariantNumeric:"tabular-nums"}}>{v.toFixed(1)}</span></div>}
+function EC({e,p}){if(e==null)return<span style={{color:T.td}}>—</span>;const c=eC(e);return<div style={{display:"flex",flexDirection:"column",gap:2}}><div style={{display:"flex",alignItems:"center",gap:6}}><div style={{width:44,height:4,background:"rgba(255,255,255,.05)",borderRadius:2,overflow:"hidden"}}><div style={{width:Math.min(e*100,100)+"%",height:"100%",background:c,borderRadius:2}}/></div><span style={{color:c,fontSize:12,fontWeight:700,fontVariantNumeric:"tabular-nums"}}>{(e*100).toFixed(2)}%</span></div>{p!=null&&<span style={{fontSize:9,color:T.tm}}>{(p*100).toFixed(0)}th pctl</span>}</div>}
+function Chip({i,c,cl=T.tm}){return<span style={{display:"inline-flex",alignItems:"center",gap:4,padding:"2px 7px",background:"rgba(255,255,255,.03)",borderRadius:3,fontSize:11,color:cl}}>{i} {c??"—"}</span>}
+function XB({nu,ms,ed,et}){if(!nu&&!ms&&!ed&&!et)return<span style={{color:T.td}}>—</span>;return<div style={{display:"flex",gap:3,flexWrap:"wrap"}}>{nu&&<span style={{padding:"1px 6px",borderRadius:3,background:"rgba(168,85,247,.12)",border:"1px solid rgba(168,85,247,.25)",color:"#c084fc",fontSize:9,fontWeight:700}}>NUCLEI</span>}{ms&&<span style={{padding:"1px 6px",borderRadius:3,background:"rgba(239,68,68,.12)",border:"1px solid rgba(239,68,68,.25)",color:"#f87171",fontSize:9,fontWeight:700}}>MSF</span>}{ed&&<span style={{padding:"1px 6px",borderRadius:3,background:"rgba(251,191,36,.12)",border:"1px solid rgba(251,191,36,.25)",color:"#fbbf24",fontSize:9,fontWeight:700}}>EDB</span>}{et&&<span style={{padding:"1px 6px",borderRadius:3,background:"rgba(6,182,212,.12)",border:"1px solid rgba(6,182,212,.25)",color:"#22d3ee",fontSize:9,fontWeight:700}}>ET</span>}</div>}
+function Btn({d,o,ch}){return<button disabled={d} onClick={o} style={{padding:"4px 10px",borderRadius:4,border:`1px solid ${T.bd}`,background:"transparent",color:d?T.td:T.tm,fontSize:11,fontFamily:"inherit",cursor:d?"default":"pointer"}}>{ch}</button>}
+function AD({sk,k,sd}){if(sk!==k)return<span style={{color:T.td,marginLeft:3}}>⇅</span>;return<span style={{color:T.ac,marginLeft:3}}>{sd==="desc"?"↓":"↑"}</span>}
 
-// LevelBlue / SpiderLabs inspired palette
-const T = {
-  bg: "#080c1a", bgCard: "#0c1228", bgHover: "#111936", bgExpand: "#0e1530",
-  border: "#1a2347", borderActive: "#2563eb",
-  accent: "#2563eb", accentLight: "#3b82f6", accentGlow: "rgba(37,99,235,.12)",
-  text: "#c7d2e0", textMuted: "#5b6b82", textDim: "#3a4a63",
-  white: "#e8edf5",
-  red: "#ef4444", orange: "#f59e0b", yellow: "#eab308", green: "#22c55e",
-  purple: "#a855f7", pink: "#ec4899", cyan: "#06b6d4",
-};
-const sevColor = {
-  CRITICAL: { bg: "rgba(239,68,68,.12)", border: "#ef4444", text: "#fca5a5", badge: "#dc2626" },
-  HIGH: { bg: "rgba(245,158,11,.1)", border: "#f59e0b", text: "#fcd34d", badge: "#d97706" },
-  MEDIUM: { bg: "rgba(234,179,8,.1)", border: "#eab308", text: "#fde047", badge: "#a16207" },
-  LOW: { bg: "rgba(34,197,94,.1)", border: "#22c55e", text: "#86efac", badge: "#16a34a" },
-  NONE: { bg: "rgba(91,107,130,.08)", border: T.textDim, text: T.textMuted, badge: T.textDim },
-};
-const sc = s => sevColor[s?.toUpperCase()] || sevColor.NONE;
-const extractYear = id => { const m = id.match(/CVE-(\d{4})/); return m ? +m[1] : 0; };
-const strip = h => h ? h.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim() : "";
-const timeAgo = d => { if (!d) return ""; const m = Math.floor((Date.now() - new Date(d)) / 60000); if (m < 60) return m + "m ago"; const h = Math.floor(m / 60); if (h < 24) return h + "h ago"; const dy = Math.floor(h / 24); return dy < 30 ? dy + "d ago" : Math.floor(dy / 30) + "mo ago"; };
-const epsC = s => s == null ? T.textDim : s >= .5 ? T.red : s >= .15 ? T.orange : s >= .05 ? T.yellow : T.green;
+// SVG Charts
+function LnCh({data,w=600,h=180}){if(!data||data.length<2)return null;const mx=Math.max(...data.map(d=>d.cumulative))||1;const px=i=>50+(i/(data.length-1))*(w-70);const py=d=>h-25-((d.cumulative/mx)*(h-55));const pts=data.map((d,i)=>`${px(i)},${py(d)}`).join(" ");return<svg viewBox={`0 0 ${w} ${h}`} style={{width:"100%",maxWidth:w}}>{[0,.25,.5,.75,1].map(f=>{const y=h-25-(f*(h-55));return<g key={f}><line x1="50" x2={w-20} y1={y} y2={y} stroke={T.bd} strokeWidth="1"/><text x="46" y={y+4} fill={T.td} fontSize="9" textAnchor="end">{Math.round(mx*f)}</text></g>})}<polyline points={pts} fill="none" stroke={T.ac} strokeWidth="2"/>{data.map((d,i)=><g key={d.year}><circle cx={px(i)} cy={py(d)} r="3" fill={T.ac}/>{data.length<=25&&<text x={px(i)} y={h-8} fill={T.tm} fontSize="8" textAnchor="middle">{d.year}</text>}</g>)}</svg>}
+function Pie({a=0,b=0,sz=150}){const t=a+b;if(!t)return null;const r=sz/2-10,cx=sz/2,cy=sz/2,pA=a/t*360;const arc=(sa,ea)=>{const rd=d=>d*Math.PI/180;const s=rd(sa-90),e=rd(ea-90);return`M${cx},${cy} L${cx+r*Math.cos(s)},${cy+r*Math.sin(s)} A${r},${r} 0 ${ea-sa>180?1:0} 1 ${cx+r*Math.cos(e)},${cy+r*Math.sin(e)} Z`};return<svg viewBox={`0 0 ${sz} ${sz}`} style={{width:sz,height:sz}}>{pA>0&&pA<360?<><path d={arc(0,pA)} fill={T.cy}/><path d={arc(pA,360)} fill={T.p}/></>:pA>=360?<circle cx={cx} cy={cy} r={r} fill={T.cy}/>:<circle cx={cx} cy={cy} r={r} fill={T.p}/>}<circle cx={cx} cy={cy} r={r*.55} fill={T.bgC}/><text x={cx} y={cy-3} fill={T.wh} fontSize="14" fontWeight="800" textAnchor="middle">{t}</text><text x={cx} y={cy+10} fill={T.tm} fontSize="8" textAnchor="middle">TOTAL</text></svg>}
 
-function Badge({ severity }) { const c = sc(severity); return <span style={{ display: "inline-block", padding: "2px 10px", borderRadius: 4, background: c.badge, color: "#fff", fontSize: 10, fontWeight: 700, letterSpacing: ".06em", textTransform: "uppercase", whiteSpace: "nowrap" }}>{severity || "N/A"}</span> }
-function CvssBar({ score }) { if (score == null) return <span style={{ color: T.textDim, fontSize: 13 }}>—</span>; const p = score / 10 * 100, c = score >= 9 ? T.red : score >= 7 ? T.orange : score >= 4 ? T.yellow : T.green; return <div style={{ display: "flex", alignItems: "center", gap: 8 }}><div style={{ width: 56, height: 5, background: "rgba(255,255,255,.05)", borderRadius: 3, overflow: "hidden" }}><div style={{ width: p + "%", height: "100%", background: c, borderRadius: 3 }} /></div><span style={{ color: c, fontSize: 12, fontWeight: 700, fontVariantNumeric: "tabular-nums", minWidth: 26 }}>{score.toFixed(1)}</span></div> }
-function EpssCell({ epss, percentile }) { if (epss == null) return <span style={{ color: T.textDim, fontSize: 12 }}>—</span>; const c = epsC(epss), p = Math.min(epss * 100, 100); return <div style={{ display: "flex", flexDirection: "column", gap: 2 }}><div style={{ display: "flex", alignItems: "center", gap: 6 }}><div style={{ width: 44, height: 4, background: "rgba(255,255,255,.05)", borderRadius: 2, overflow: "hidden" }}><div style={{ width: p + "%", height: "100%", background: c, borderRadius: 2 }} /></div><span style={{ color: c, fontSize: 12, fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{(epss * 100).toFixed(2)}%</span></div>{percentile != null && <span style={{ fontSize: 9, color: T.textMuted }}>{(percentile * 100).toFixed(0)}th pctl</span>}</div> }
-function Chip({ icon, count, color = T.textMuted }) { return <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 7px", background: "rgba(255,255,255,.03)", borderRadius: 3, fontSize: 11, color }}>{icon} {count ?? "—"}</span> }
+// ═══ CVE FEED TAB ═══
+const COLS=[{k:"id",l:"CVE ID",s:"year"},{k:"sv",l:"Severity",s:"sev"},{k:"cv",l:"CVSS 3",s:"cvss"},{k:"ep",l:"EPSS",s:"epss"},{k:"ex",l:"Exploits",s:"exploits"},{k:"et",l:"ET",s:"et",a:"center"},{k:"ih",l:"Inhouse",s:"inhouse",a:"center"},{k:"po",l:"Posts",s:"posts",a:"center"},{k:"re",l:"Repos",s:"repos",a:"center"},{k:"nu",l:"Nuclei",s:"nuclei"},{k:"ds",l:"Description",mn:180}];
 
-function ExploitBadges({ nuclei, msf, edb, et }) {
-  if (!nuclei && !msf && !edb && !et) return <span style={{ color: T.textDim, fontSize: 11 }}>—</span>;
-  return <div style={{ display: "flex", gap: 3, flexWrap: "wrap" }}>
-    {nuclei && <span title="Nuclei template" style={{ padding: "1px 6px", borderRadius: 3, background: "rgba(168,85,247,.12)", border: "1px solid rgba(168,85,247,.25)", color: "#c084fc", fontSize: 9, fontWeight: 700 }}>NUCLEI</span>}
-    {msf && <span title="Metasploit module" style={{ padding: "1px 6px", borderRadius: 3, background: "rgba(239,68,68,.12)", border: "1px solid rgba(239,68,68,.25)", color: "#f87171", fontSize: 9, fontWeight: 700 }}>MSF</span>}
-    {edb && <span title="Exploit-DB" style={{ padding: "1px 6px", borderRadius: 3, background: "rgba(251,191,36,.12)", border: "1px solid rgba(251,191,36,.25)", color: "#fbbf24", fontSize: 9, fontWeight: 700 }}>EDB</span>}
-    {et && <span title="Emerging Threats rule" style={{ padding: "1px 6px", borderRadius: 3, background: "rgba(6,182,212,.12)", border: "1px solid rgba(6,182,212,.25)", color: "#22d3ee", fontSize: 9, fontWeight: 700 }}>ET</span>}
+function CveTab(){
+  const[raw,setR]=useState(null);const[ep,setEp]=useState(null);const[nu,setNu]=useState(null);const[ms,setMs]=useState(null);const[ed,setEd]=useState(null);const[et,setEt]=useState(null);const[kv,setKv]=useState(null);const[ld,setLd]=useState(true);const[er,setEr]=useState(null);const[sk,setSk]=useState("cvss");const[sd,setSd]=useState("desc");const[sf,setSf]=useState("ALL");const[ef,setEf]=useState("ALL");const[q,setQ]=useState("");const[ex,setEx]=useState(null);const[pg,setPg]=useState(0);const[ps,setPs]=useState(30);
+  // Inhouse rules
+  const[ih,setIh]=useState(null);const[ihFile,setIhF]=useState(null);const[ihUl,setIhUl]=useState(false);
+  const ihRef=useRef(null);
+
+  useEffect(()=>{(async()=>{try{const r=await fetch(FEED);if(!r.ok)throw new Error("HTTP "+r.status);setR(await r.json())}catch(e){setEr(e.message)}finally{setLd(false)}})()},[]);
+  useEffect(()=>{(async()=>{const[a,b,c,d,e,f]=await Promise.all([fJ("/api/epss"),fJ("/api/nuclei"),fJ("/api/metasploit"),fJ("/api/exploitdb"),fJ("/api/et-rules"),fJ("/api/kev")]);setEp(a);setNu(b);setMs(c);setEd(d);setEt(e);setKv(f)})()},[]);
+
+  const uploadIh=async(file)=>{setIhUl(true);const fd=new FormData();fd.append("file",file);try{const r=await fetch("/api/inhouse/upload",{method:"POST",body:fd});const j=await r.json();if(!r.ok)throw new Error(j.error);setIh(j.cve_coverage);setIhF(`${file.name} (${j.rule_count} rules, ${j.cve_count} CVEs)`)}catch(e){console.error(e)}finally{setIhUl(false)}};
+
+  const entries=useMemo(()=>{if(!raw)return[];return Object.entries(raw).map(([id,d])=>{const e2=ep?.[id],n=nu?.[id],m=ms?.[id],x=ed?.[id],t=et?.[id],k=kv?.[id],i=ih?.[id];return{id,...d,yr:eY(id),pc:d.posts?.length||0,rc:d.repos?.length||0,nd:n?(n.name||"yes"):(d.nuclei?.updated||null),ni:n||d.nuclei||null,ds:d.description||"",es:e2?.epss??null,ep2:e2?.percentile??null,hn:!!n,hm:!!m,he:!!x,ht:!!t,ik:!!k,ki:k,mm:m,ee:x,tr:t,xc:(n?1:0)+(m?m.length:0)+(x?x.length:0),tc:t?t.length:0,ihRules:i||null,hasIh:!!i}})},[raw,ep,nu,ms,ed,et,kv,ih]);
+
+  const hs=useCallback(k=>{if(!k)return;sk===k?setSd(d=>d==="desc"?"asc":"desc"):(setSk(k),setSd("desc"))},[sk]);
+  const flt=useMemo(()=>{let f=entries;if(sf!=="ALL")f=f.filter(e=>(e.severity||"").toUpperCase()===sf);if(ef!=="ALL")f=f.filter(e=>{const s=e.es;if(s==null)return false;return ef==="CRITICAL"?s>=.5:ef==="HIGH"?s>=.15&&s<.5:ef==="MEDIUM"?s>=.05&&s<.15:s<.05});if(q.trim()){const x=q.toLowerCase();f=f.filter(e=>e.id.toLowerCase().includes(x)||(e.ds||"").toLowerCase().includes(x))}f.sort((a,b)=>{let c=0;switch(sk){case"cvss":c=(b.cvss3??-1)-(a.cvss3??-1);break;case"year":c=b.yr-a.yr||b.id.localeCompare(a.id);break;case"sev":c=(SR[b.severity?.toUpperCase()]||0)-(SR[a.severity?.toUpperCase()]||0);break;case"epss":c=(b.es??-1)-(a.es??-1);break;case"posts":c=b.pc-a.pc;break;case"repos":c=b.rc-a.rc;break;case"nuclei":c=(b.nd||"").localeCompare(a.nd||"");break;case"exploits":c=b.xc-a.xc;break;case"et":c=b.tc-a.tc;break;case"inhouse":c=(b.ihRules?.length||0)-(a.ihRules?.length||0);break;default:c=0}return sd==="asc"?-c:c});return f},[entries,sf,ef,q,sk,sd]);
+
+  const sa=ps==="All",ep3=sa?flt.length:ps,tp=sa?1:Math.ceil(flt.length/ep3),pd=flt.slice(pg*ep3,(pg+1)*ep3);
+  useEffect(()=>{setPg(0)},[sk,sd,sf,ef,q,ps]);
+  const tg=useCallback(id=>setEx(p=>p===id?null:id),[]);
+  if(ld)return<div style={{textAlign:"center",padding:80,color:T.tm}}>Loading...</div>;
+  if(er)return<div style={{textAlign:"center",padding:80,color:T.r}}>ERROR: {er}</div>;
+
+  const FB=({l,v,o})=><div style={{display:"flex",alignItems:"center",gap:5}}><span style={{fontSize:10,color:T.tm,textTransform:"uppercase",letterSpacing:".1em",fontWeight:600}}>{l}</span>{FL.map(s=><button key={s} onClick={()=>o(s)} style={{padding:"3px 9px",borderRadius:4,border:"1px solid",borderColor:v===s?(s==="ALL"?T.ac:sc(s).bd):T.bd,background:v===s?(s==="ALL"?T.ag:sc(s).bg):"transparent",color:v===s?(s==="ALL"?T.al:sc(s).tx):T.td,fontSize:10,fontFamily:"inherit",cursor:"pointer",fontWeight:v===s?600:400}}>{s}</button>)}</div>;
+  const Pg=()=>tp>1?<div style={{display:"flex",gap:5,alignItems:"center"}}><Btn d={pg===0} o={()=>setPg(p=>p-1)}>← Prev</Btn><span style={{fontSize:11,color:T.tm,fontVariantNumeric:"tabular-nums"}}>{pg+1}/{tp}</span><Btn d={pg>=tp-1} o={()=>setPg(p=>p+1)}>Next →</Btn></div>:null;
+
+  return<div>
+    {/* Inhouse rules upload bar */}
+    <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:14,padding:"10px 14px",background:T.bgC,borderRadius:8,border:`1px solid ${T.bd}`}}>
+      <span style={{fontSize:11,fontWeight:600,color:T.wh,whiteSpace:"nowrap"}}>Inhouse Rules:</span>
+      <input ref={ihRef} type="file" accept=".rules,.txt" style={{display:"none"}} onChange={e=>e.target.files[0]&&uploadIh(e.target.files[0])}/>
+      <button onClick={()=>ihRef.current?.click()} disabled={ihUl} style={{padding:"5px 14px",borderRadius:5,border:`1px dashed ${ih?T.g:T.ac}`,background:ih?"rgba(34,197,94,.06)":T.ag,color:ih?T.g:T.al,fontSize:11,cursor:"pointer",fontFamily:"inherit",fontWeight:600,whiteSpace:"nowrap"}}>{ihUl?"Uploading...":ih?`✓ ${ihFile}`:"Upload .rules to check coverage"}</button>
+      {ih&&<span style={{fontSize:10,color:T.tm}}>CVEs with inhouse coverage are marked in the table</span>}
+      {ih&&<button onClick={()=>{setIh(null);setIhF(null)}} style={{padding:"3px 8px",borderRadius:4,border:`1px solid ${T.bd}`,background:"transparent",color:T.td,fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>Clear</button>}
+    </div>
+
+    <div style={{display:"flex",gap:12,marginBottom:14,flexWrap:"wrap",alignItems:"center"}}><FB l="Severity" v={sf} o={setSf}/><div style={{width:1,height:18,background:T.bd}}/><FB l="EPSS" v={ef} o={setEf}/><div style={{flex:1}}/><input type="text" placeholder="Search CVE..." value={q} onChange={e=>setQ(e.target.value)} style={{width:260,padding:"8px 12px",background:"rgba(255,255,255,.03)",border:`1px solid ${T.bd}`,borderRadius:6,color:T.wh,fontSize:12,fontFamily:"inherit"}}/></div>
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,flexWrap:"wrap",gap:8}}><div style={{display:"flex",alignItems:"center",gap:10}}><span style={{fontSize:11,color:T.tm}}>Showing {pd.length} of {flt.length}</span><div style={{display:"flex",gap:4}}>{PS.map(s=><button key={s} onClick={()=>setPs(s)} style={{padding:"2px 7px",borderRadius:3,border:`1px solid ${ps===s?T.ac:T.bd}`,background:ps===s?T.ag:"transparent",color:ps===s?T.al:T.td,fontSize:10,fontFamily:"inherit",cursor:"pointer"}}>{s}</button>)}</div></div><Pg/></div>
+
+    <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"separate",borderSpacing:"0 3px"}}><thead><tr>{COLS.map(c=><th key={c.k} onClick={()=>c.s&&hs(c.s)} style={{textAlign:c.a||"left",padding:"7px 10px",fontWeight:600,fontSize:10,color:sk===c.s?T.al:T.tm,textTransform:"uppercase",letterSpacing:".08em",cursor:c.s?"pointer":"default",userSelect:"none",whiteSpace:"nowrap",minWidth:c.mn,borderBottom:sk===c.s?`2px solid ${T.ac}`:"2px solid transparent"}}>{c.l}{c.s&&<AD sk={sk} k={c.s} sd={sd}/>}</th>)}</tr></thead>
+    <tbody>{pd.map(e=>{const ix=ex===e.id,c=sc(e.severity);return<React.Fragment key={e.id}>
+      <tr onClick={()=>tg(e.id)} style={{cursor:"pointer",background:ix?T.bgX:T.bgC,borderLeft:`3px solid ${c.bd}`}} onMouseEnter={v=>{if(!ix)v.currentTarget.style.background=T.bgH}} onMouseLeave={v=>{v.currentTarget.style.background=ix?T.bgX:T.bgC}}>
+        <td style={{padding:"9px 10px",whiteSpace:"nowrap"}}><span style={{color:T.al,fontWeight:600,fontSize:12}}>{e.id}</span>{e.ik&&<span style={{marginLeft:5,padding:"1px 5px",borderRadius:3,background:"rgba(239,68,68,.15)",border:"1px solid rgba(239,68,68,.3)",color:T.r,fontSize:8,fontWeight:700}}>KEV</span>}<div style={{fontSize:10,color:T.td}}>{e.yr}</div></td>
+        <td style={{padding:"9px 10px"}}><Bdg s={e.severity}/></td><td style={{padding:"9px 10px"}}><CBar v={e.cvss3}/></td><td style={{padding:"9px 10px"}}><EC e={e.es} p={e.ep2}/></td>
+        <td style={{padding:"9px 10px"}}><XB nu={e.hn} ms={e.hm} ed={e.he} et={e.ht}/></td>
+        <td style={{padding:"9px 10px",textAlign:"center"}}>{e.tc>0?<span style={{color:T.cy,fontWeight:700,fontSize:12}}>{e.tc}</span>:<span style={{color:T.td}}>—</span>}</td>
+        <td style={{padding:"9px 10px",textAlign:"center"}}>{e.hasIh?<span style={{padding:"1px 6px",borderRadius:3,background:"rgba(34,197,94,.12)",border:"1px solid rgba(34,197,94,.3)",color:T.g,fontSize:9,fontWeight:700}}>{e.ihRules.length} SIG{e.ihRules.length>1?"S":""}</span>:<span style={{color:T.td}}>—</span>}</td>
+        <td style={{padding:"9px 10px",textAlign:"center"}}><Chip i="💬" c={e.pc} cl={e.pc>3?T.o:T.tm}/></td>
+        <td style={{padding:"9px 10px",textAlign:"center"}}><Chip i="📦" c={e.rc} cl={e.rc>0?T.p:T.tm}/></td>
+        <td style={{padding:"9px 10px",fontSize:11,maxWidth:130}}>{e.ni?<span style={{color:T.g,fontWeight:600}}>{e.ni.name?e.ni.name.slice(0,25)+(e.ni.name.length>25?"…":""):"✓"}</span>:<span style={{color:T.td}}>—</span>}</td>
+        <td style={{padding:"9px 10px",fontSize:11,color:T.tm,maxWidth:260}}><div style={{overflow:"hidden",textOverflow:"ellipsis",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical",lineHeight:1.5}}>{e.ds||<span style={{color:T.td,fontStyle:"italic"}}>No description</span>}</div></td>
+      </tr>
+      {ix&&<tr><td colSpan={11} style={{padding:"0 10px 10px",background:T.bgX}}><div style={{padding:16,background:"rgba(0,0,0,.25)",borderRadius:8,border:`1px solid ${T.bd}`}}>
+        <div style={{marginBottom:16,display:"flex",gap:28,flexWrap:"wrap"}}>{e.es!=null&&<div><div style={{fontSize:10,color:T.tm,textTransform:"uppercase",marginBottom:3,fontWeight:600}}>EPSS</div><span style={{fontSize:20,fontWeight:800,color:eC(e.es)}}>{(e.es*100).toFixed(3)}%</span></div>}{e.cvss3!=null&&<div><div style={{fontSize:10,color:T.tm,textTransform:"uppercase",marginBottom:3,fontWeight:600}}>CVSS</div><span style={{fontSize:20,fontWeight:800,color:e.cvss3>=9?T.r:e.cvss3>=7?T.o:T.y}}>{e.cvss3.toFixed(1)}</span></div>}</div>
+        {/* Inhouse coverage */}
+        {e.ihRules&&<div style={{marginBottom:16}}><div style={{fontSize:10,color:T.g,textTransform:"uppercase",marginBottom:8,fontWeight:700}}>Inhouse Coverage ({e.ihRules.length} rules)</div>{e.ihRules.map((r,i)=><div key={i} style={{padding:"6px 10px",background:"rgba(34,197,94,.04)",borderRadius:5,border:"1px solid rgba(34,197,94,.12)",marginBottom:3,fontSize:11}}><span style={{color:T.g,fontWeight:600}}>SID:{r.sid}</span><span style={{color:T.tx,marginLeft:8}}>{r.msg}</span>{r.severity&&<span style={{color:T.td,marginLeft:8,fontSize:10}}>({r.severity})</span>}</div>)}</div>}
+        {e.ik&&e.ki&&<div style={{marginBottom:16,padding:"10px 12px",background:"rgba(239,68,68,.06)",borderRadius:6,border:"1px solid rgba(239,68,68,.15)"}}><div style={{fontSize:10,color:T.r,textTransform:"uppercase",fontWeight:700,marginBottom:4}}>CISA KEV</div><div style={{fontSize:11,color:T.tx}}><strong>{e.ki.name}</strong> — {e.ki.vendor} {e.ki.product}</div><div style={{fontSize:10,color:T.tm,marginTop:4}}>Added: {e.ki.dateAdded} · Ransomware: {e.ki.ransomware}</div></div>}
+        {e.tr&&<div style={{marginBottom:16}}><div style={{fontSize:10,color:T.tm,textTransform:"uppercase",marginBottom:8,fontWeight:600}}>ET Rules ({e.tr.length})</div>{e.tr.slice(0,5).map((r,i)=><div key={i} style={{padding:"6px 10px",background:"rgba(6,182,212,.04)",borderRadius:5,border:"1px solid rgba(6,182,212,.1)",marginBottom:3,fontSize:11}}><span style={{color:T.cy,fontWeight:600}}>SID:{r.sid}</span><span style={{color:T.tx,marginLeft:8}}>{r.msg}</span></div>)}</div>}
+        {e.ni&&<div style={{marginBottom:16}}><div style={{fontSize:10,color:T.tm,textTransform:"uppercase",marginBottom:8,fontWeight:600}}>Nuclei</div><div style={{padding:"8px 10px",background:"rgba(168,85,247,.04)",borderRadius:5,border:"1px solid rgba(168,85,247,.12)",fontSize:11}}>{e.ni.name&&<div style={{color:"#c084fc",fontWeight:600}}>{e.ni.name}</div>}{e.ni.file_path&&<a href={`https://github.com/projectdiscovery/nuclei-templates/blob/main/${e.ni.file_path}`} target="_blank" rel="noopener noreferrer" style={{color:T.p,textDecoration:"none",fontSize:10}}>View template →</a>}</div></div>}
+        {e.mm&&<div style={{marginBottom:16}}><div style={{fontSize:10,color:T.tm,textTransform:"uppercase",marginBottom:8,fontWeight:600}}>Metasploit ({e.mm.length})</div>{e.mm.slice(0,3).map((m,i)=><div key={i} style={{padding:"6px 10px",background:"rgba(239,68,68,.04)",borderRadius:5,border:"1px solid rgba(239,68,68,.1)",marginBottom:3,fontSize:11}}><span style={{color:"#f87171",fontWeight:600}}>{m.name}</span></div>)}</div>}
+        {e.ee&&<div style={{marginBottom:16}}><div style={{fontSize:10,color:T.tm,textTransform:"uppercase",marginBottom:8,fontWeight:600}}>Exploit-DB ({e.ee.length})</div>{e.ee.slice(0,3).map((x,i)=><div key={i} style={{padding:"6px 10px",background:"rgba(251,191,36,.04)",borderRadius:5,border:"1px solid rgba(251,191,36,.1)",marginBottom:3,fontSize:11}}><a href={x.url} target="_blank" rel="noopener noreferrer" style={{color:T.o,textDecoration:"none",fontWeight:600}}>EDB-{x.id}</a><span style={{color:T.tm,marginLeft:8}}>{x.title}</span></div>)}</div>}
+        {e.ds&&<div style={{marginBottom:16}}><div style={{fontSize:10,color:T.tm,textTransform:"uppercase",marginBottom:8,fontWeight:600}}>Description</div><div style={{fontSize:12,color:T.tx,lineHeight:1.6}}>{e.ds}</div></div>}
+        {e.posts?.length>0&&<div><div style={{fontSize:10,color:T.tm,textTransform:"uppercase",marginBottom:8,fontWeight:600}}>Posts ({e.posts.length})</div>{e.posts.slice(0,3).map((p,i)=><div key={i} style={{padding:"8px 10px",background:"rgba(255,255,255,.02)",borderRadius:5,marginBottom:4,borderLeft:`2px solid ${T.bd}`,fontSize:11}}><span style={{color:T.al}}>@{p.account?.acct||"?"}</span><div style={{color:T.tm,lineHeight:1.5,marginTop:3}}>{strip(p.content).slice(0,200)}</div></div>)}</div>}
+      </div></td></tr>}
+    </React.Fragment>})}</tbody></table></div>
+    {flt.length===0&&<div style={{textAlign:"center",padding:60,color:T.td}}>No CVEs match</div>}
+    {tp>1&&<div style={{display:"flex",justifyContent:"center",marginTop:20}}><Pg/></div>}
   </div>;
 }
 
-const COLUMNS = [
-  { key: "id", label: "CVE ID", sort: "year", align: "left" },
-  { key: "sev", label: "Severity", sort: "sev", align: "left" },
-  { key: "cvss", label: "CVSS 3", sort: "cvss", align: "left" },
-  { key: "epss", label: "EPSS", sort: "epss", align: "left" },
-  { key: "exploits", label: "Public Exploits", sort: "exploits", align: "left" },
-  { key: "et", label: "ET Rules", sort: "et", align: "center" },
-  { key: "posts", label: "Posts", sort: "posts", align: "center" },
-  { key: "repos", label: "Repos", sort: "repos", align: "center" },
-  { key: "nuclei", label: "Nuclei", sort: "nuclei", align: "left" },
-  { key: "desc", label: "Description", sort: null, align: "left", min: 200 },
-];
-const SEV_RANK = { CRITICAL: 4, HIGH: 3, MEDIUM: 2, LOW: 1 };
-const FILTERS = ["ALL", "CRITICAL", "HIGH", "MEDIUM", "LOW"];
-const PAGE_SIZES = [5, 10, 15, 30, 50, 100, "All"];
+// ═══ ANALYSIS TAB ═══
+function ATab(){
+  const[rf,setRf]=useState(null);const[pf,setPf]=useState(null);const[ru,setRu]=useState(false);const[pu,setPu]=useState(false);const[ul,setUl]=useState("");const[rn,setRn]=useState(false);const[rs,setRs]=useState(null);const[er,setEr]=useState("");const[ft,setFt]=useState("ALL");const[sb,setSb]=useState("score");const[sd,setSd]=useState("asc");const[xs,setXs]=useState(null);const[sq,setSq]=useState("");
+  const rr=useRef(null);const pr=useRef(null);
+  const uR=async f=>{setUl("r");setEr("");const fd=new FormData();fd.append("file",f);try{const r=await fetch("/api/analysis/upload-rules",{method:"POST",body:fd});const j=await r.json();if(!r.ok)throw new Error(j.error);setRu(true);setRf(f.name)}catch(e){setEr(e.message)}finally{setUl("")}};
+  const uP=async f=>{setUl("p");setEr("");const fd=new FormData();fd.append("file",f);try{const r=await fetch("/api/analysis/upload-pcap",{method:"POST",body:fd});const j=await r.json();if(!r.ok)throw new Error(j.error);setPu(true);setPf(`${f.name} (${j.size_mb}MB)`)}catch(e){setEr(e.message)}finally{setUl("")}};
+  const run=async()=>{setRn(true);setEr("");setRs(null);try{const r=await fetch("/api/analysis/run",{method:"POST"});const j=await r.json();if(!r.ok)throw new Error(j.error);setRs(j)}catch(e){setEr(e.message)}finally{setRn(false)}};
+  const hs=k=>{sb===k?setSd(d=>d==="asc"?"desc":"asc"):(setSb(k),setSd("asc"))};
+  const fR=useMemo(()=>{if(!rs)return[];let f=rs.rules;if(ft!=="ALL")f=f.filter(r=>r.verdict===ft);if(sq.trim()){const q=sq.toLowerCase();f=f.filter(r=>r.sid?.includes(q)||r.msg?.toLowerCase().includes(q)||(r.cves||[]).some(c=>c.toLowerCase().includes(q)))}f=[...f].sort((a,b)=>{let c=0;switch(sb){case"score":c=(a.rubric_score??999)-(b.rubric_score??999);break;case"sid":c=(a.sid||"").localeCompare(b.sid||"");break;case"checks":c=a.checks-b.checks;break;case"epss":c=(a.enrichment?.epss_score??-1)-(b.enrichment?.epss_score??-1);break;default:c=0}return sd==="desc"?-c:c});return f},[rs,ft,sq,sb,sd]);
+  const S=rs?.summary;
 
-async function fetchJson(url) { try { const r = await fetch(url); if (!r.ok) throw 0; return await r.json(); } catch { return null; } }
-
-export default function App() {
-  const [raw, setRaw] = useState(null);
-  const [epssData, setEpss] = useState(null);
-  const [nucleiData, setNuclei] = useState(null);
-  const [msfData, setMsf] = useState(null);
-  const [edbData, setEdb] = useState(null);
-  const [etData, setEt] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [enrichLoading, setEnrich] = useState(true);
-  const [error, setError] = useState(null);
-  const [sortKey, setSortKey] = useState("cvss");
-  const [sortDir, setSortDir] = useState("desc");
-  const [sevFilter, setSevF] = useState("ALL");
-  const [epssFilter, setEpssF] = useState("ALL");
-  const [search, setSearch] = useState("");
-  const [expanded, setExpanded] = useState(null);
-  const [page, setPage] = useState(0);
-  const [pageSize, setPageSize] = useState(30);
-
-  useEffect(() => { (async () => { try { const r = await fetch(FEED_URL); if (!r.ok) throw new Error("HTTP " + r.status); setRaw(await r.json()) } catch (e) { setError(e.message) } finally { setLoading(false) } })() }, []);
-  useEffect(() => { (async () => { const [e, n, m, d, et] = await Promise.all([fetchJson("/api/epss"), fetchJson("/api/nuclei"), fetchJson("/api/metasploit"), fetchJson("/api/exploitdb"), fetchJson("/api/et-rules")]); setEpss(e); setNuclei(n); setMsf(m); setEdb(d); setEt(et); setEnrich(false) })() }, []);
-
-  const entries = useMemo(() => {
-    if (!raw) return [];
-    return Object.entries(raw).map(([id, d]) => {
-      const ep = epssData?.[id], nu = nucleiData?.[id], ms = msfData?.[id], ed = edbData?.[id], et = etData?.[id];
-      return {
-        id, ...d, year: extractYear(id), postCount: d.posts?.length || 0, repoCount: d.repos?.length || 0,
-        nucleiDate: nu ? (nu.name || "yes") : (d.nuclei?.updated || null),
-        nucleiInfo: nu || d.nuclei || null,
-        desc: d.description || "",
-        epssScore: ep?.epss ?? null, epssPercentile: ep?.percentile ?? null,
-        hasNuclei: !!nu, hasMsf: !!ms, hasEdb: !!ed, hasEt: !!et,
-        msfModules: ms || null, edbEntries: ed || null, etRules: et || null,
-        exploitCount: (nu ? 1 : 0) + (ms ? ms.length : 0) + (ed ? ed.length : 0),
-        etCount: et ? et.length : 0,
-      };
-    });
-  }, [raw, epssData, nucleiData, msfData, edbData, etData]);
-
-  const handleSort = useCallback(k => { if (!k) return; sortKey === k ? setSortDir(d => d === "desc" ? "asc" : "desc") : (setSortKey(k), setSortDir("desc")) }, [sortKey]);
-
-  const filtered = useMemo(() => {
-    let f = entries;
-    if (sevFilter !== "ALL") f = f.filter(e => (e.severity || "").toUpperCase() === sevFilter);
-    if (epssFilter !== "ALL") f = f.filter(e => { const s = e.epssScore; if (s == null) return false; switch (epssFilter) { case "CRITICAL": return s >= .5; case "HIGH": return s >= .15 && s < .5; case "MEDIUM": return s >= .05 && s < .15; case "LOW": return s < .05; default: return true } });
-    if (search.trim()) { const q = search.toLowerCase(); f = f.filter(e => e.id.toLowerCase().includes(q) || (e.desc || "").toLowerCase().includes(q) || (e.posts || []).some(p => strip(p.content).toLowerCase().includes(q))) }
-    f.sort((a, b) => { let c = 0; switch (sortKey) { case "cvss": c = (b.cvss3 ?? -1) - (a.cvss3 ?? -1); break; case "year": c = b.year - a.year || b.id.localeCompare(a.id); break; case "sev": c = (SEV_RANK[b.severity?.toUpperCase()] || 0) - (SEV_RANK[a.severity?.toUpperCase()] || 0); break; case "epss": c = (b.epssScore ?? -1) - (a.epssScore ?? -1); break; case "posts": c = b.postCount - a.postCount; break; case "repos": c = b.repoCount - a.repoCount; break; case "nuclei": c = (b.nucleiDate || "").localeCompare(a.nucleiDate || ""); break; case "exploits": c = b.exploitCount - a.exploitCount; break; case "et": c = b.etCount - a.etCount; break; default: c = 0 } return sortDir === "asc" ? -c : c });
-    return f;
-  }, [entries, sevFilter, epssFilter, search, sortKey, sortDir]);
-
-  const showAll = pageSize === "All";
-  const effectivePS = showAll ? filtered.length : pageSize;
-  const totalP = showAll ? 1 : Math.ceil(filtered.length / effectivePS);
-  const paged = filtered.slice(page * effectivePS, (page + 1) * effectivePS);
-  useEffect(() => { setPage(0) }, [sortKey, sortDir, sevFilter, epssFilter, search, pageSize]);
-  const toggle = useCallback(id => setExpanded(p => p === id ? null : id), []);
-
-  if (loading) return <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: T.bg, color: T.white, fontFamily: "'Inter',system-ui,sans-serif" }}><div style={{ textAlign: "center" }}><div style={{ fontSize: 32, marginBottom: 16 }}><svg width="40" height="40" viewBox="0 0 40 40" fill="none"><circle cx="20" cy="20" r="18" stroke={T.accent} strokeWidth="2" opacity=".3" /><circle cx="20" cy="20" r="18" stroke={T.accent} strokeWidth="2" strokeDasharray="28 85" style={{ animation: "spin 1s linear infinite" }} /></svg></div><div style={{ fontSize: 13, letterSpacing: 2, color: T.textMuted }}>LOADING INTELLIGENCE...</div><style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style></div></div>;
-  if (error) return <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: T.bg, color: T.red, fontFamily: "monospace" }}><div>ERROR: {error}</div></div>;
-
-  const FB = ({ label, value, onChange }) => <div style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ fontSize: 10, color: T.textMuted, textTransform: "uppercase", letterSpacing: ".1em", fontWeight: 600 }}>{label}</span>{FILTERS.map(s => <button key={s} onClick={() => onChange(s)} style={{ padding: "3px 9px", borderRadius: 4, border: "1px solid", borderColor: value === s ? (s === "ALL" ? T.accent : sc(s).border) : T.border, background: value === s ? (s === "ALL" ? T.accentGlow : sc(s).bg) : "transparent", color: value === s ? (s === "ALL" ? T.accentLight : sc(s).text) : T.textDim, fontSize: 10, fontFamily: "inherit", cursor: "pointer", fontWeight: value === s ? 600 : 400, transition: "all .15s" }}>{s}</button>)}</div>;
-  const PB = ({ disabled, onClick, children }) => <button disabled={disabled} onClick={onClick} style={{ padding: "4px 10px", borderRadius: 4, border: `1px solid ${T.border}`, background: "transparent", color: disabled ? T.textDim : T.textMuted, fontSize: 11, fontFamily: "inherit", cursor: disabled ? "default" : "pointer", transition: "color .15s" }}>{children}</button>;
-  const Pager = () => totalP > 1 ? <div style={{ display: "flex", gap: 5, alignItems: "center" }}><PB disabled={page === 0} onClick={() => setPage(p => p - 1)}>← Prev</PB><span style={{ fontSize: 11, color: T.textMuted, fontVariantNumeric: "tabular-nums" }}>{page + 1} / {totalP}</span><PB disabled={page >= totalP - 1} onClick={() => setPage(p => p + 1)}>Next →</PB></div> : null;
-  const Arrow = ({ k }) => { if (sortKey !== k) return <span style={{ color: T.textDim, marginLeft: 3, fontSize: 10 }}>⇅</span>; return <span style={{ color: T.accent, marginLeft: 3, fontSize: 10 }}>{sortDir === "desc" ? "↓" : "↑"}</span> };
-
-  return <div style={{ minHeight: "100vh", background: T.bg, color: T.text, fontFamily: "'Inter','Segoe UI',system-ui,sans-serif" }}>
-    <style>{`@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}::-webkit-scrollbar{width:5px}::-webkit-scrollbar-track{background:${T.bg}}::-webkit-scrollbar-thumb{background:${T.border};border-radius:3px}::selection{background:rgba(37,99,235,.3)}input:focus,select:focus{outline:none;border-color:${T.accent}!important;box-shadow:0 0 0 2px ${T.accentGlow}}`}</style>
-
-    {/* ── Header ── */}
-    <header style={{ background: `linear-gradient(180deg,${T.bgCard} 0%,${T.bg} 100%)`, borderBottom: `1px solid ${T.border}`, padding: "20px 32px", position: "sticky", top: 0, zIndex: 50, backdropFilter: "blur(16px)" }}>
-      <div style={{ maxWidth: 1600, margin: "0 auto" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 16 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-            {/* Spider/web icon */}
-            <div style={{ width: 36, height: 36, borderRadius: 8, background: `linear-gradient(135deg, ${T.accent}, #1d4ed8)`, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: `0 0 20px ${T.accentGlow}` }}>
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="3" /><path d="M12 2v7M12 15v7M2 12h7M15 12h7M4.93 4.93l4.95 4.95M14.12 14.12l4.95 4.95M4.93 19.07l4.95-4.95M14.12 9.88l4.95-4.95" /></svg>
-            </div>
-            <div>
-              <h1 style={{ fontSize: 20, fontWeight: 800, color: T.white, letterSpacing: "-.02em", lineHeight: 1.1 }}>
-                Arachnid Intel
-              </h1>
-              <p style={{ fontSize: 11, color: T.textMuted, marginTop: 2, fontWeight: 500 }}>
-                {entries.length} CVEs
-                {epssData && " · EPSS"}{nucleiData && " · Nuclei"}{msfData && " · MSF"}{edbData && " · EDB"}{etData && " · ET Rules"}
-                {enrichLoading && " · Loading..."}
-              </p>
-            </div>
-          </div>
-          <div style={{ position: "relative", width: 300 }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={T.textDim} strokeWidth="2" style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)" }}><circle cx="11" cy="11" r="7" /><path d="M21 21l-4.35-4.35" /></svg>
-            <input type="text" placeholder="Search CVE, description..." value={search} onChange={e => setSearch(e.target.value)} style={{ width: "100%", padding: "9px 12px 9px 34px", background: "rgba(255,255,255,.03)", border: `1px solid ${T.border}`, borderRadius: 6, color: T.white, fontSize: 12, fontFamily: "inherit" }} />
-          </div>
-        </div>
-        <div style={{ display: "flex", gap: 12, marginTop: 14, flexWrap: "wrap", alignItems: "center" }}>
-          <FB label="Severity" value={sevFilter} onChange={setSevF} />
-          <div style={{ width: 1, height: 18, background: T.border }} />
-          <FB label="EPSS" value={epssFilter} onChange={setEpssF} />
-        </div>
-      </div>
-    </header>
-
-    {/* ── Results bar ── */}
-    <div style={{ maxWidth: 1600, margin: "0 auto", padding: "14px 32px 0" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <span style={{ fontSize: 11, color: T.textMuted }}>Showing {paged.length} of {filtered.length}</span>
-          <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-            <span style={{ fontSize: 10, color: T.textDim, textTransform: "uppercase", letterSpacing: ".08em" }}>Per page</span>
-            {PAGE_SIZES.map(s => <button key={s} onClick={() => setPageSize(s)} style={{ padding: "2px 8px", borderRadius: 3, border: `1px solid ${pageSize === s ? T.accent : T.border}`, background: pageSize === s ? T.accentGlow : "transparent", color: pageSize === s ? T.accentLight : T.textDim, fontSize: 10, fontFamily: "inherit", cursor: "pointer", fontWeight: pageSize === s ? 600 : 400, transition: "all .15s" }}>{s}</button>)}
-          </div>
-        </div>
-        <Pager />
-      </div>
+  return<div>
+    <div style={{display:"flex",gap:16,marginBottom:24,flexWrap:"wrap"}}>
+      <div style={{flex:1,minWidth:280,padding:20,background:T.bgC,borderRadius:8,border:`1px solid ${T.bd}`}}><div style={{fontSize:12,fontWeight:700,color:T.wh,marginBottom:10}}>1. Upload Ruleset</div><input ref={rr} type="file" accept=".rules,.txt" style={{display:"none"}} onChange={e=>e.target.files[0]&&uR(e.target.files[0])}/><button onClick={()=>rr.current?.click()} disabled={ul==="r"} style={{padding:"10px 20px",borderRadius:6,border:`1px dashed ${ru?T.g:T.ac}`,background:ru?"rgba(34,197,94,.06)":T.ag,color:ru?T.g:T.al,fontSize:12,cursor:"pointer",fontFamily:"inherit",fontWeight:600,width:"100%"}}>{ul==="r"?"Uploading...":ru?`✓ ${rf}`:"Choose .rules file"}</button></div>
+      <div style={{flex:1,minWidth:280,padding:20,background:T.bgC,borderRadius:8,border:`1px solid ${T.bd}`}}><div style={{fontSize:12,fontWeight:700,color:T.wh,marginBottom:10}}>2. Upload PCAP</div><input ref={pr} type="file" accept=".pcap,.pcapng,.cap" style={{display:"none"}} onChange={e=>e.target.files[0]&&uP(e.target.files[0])}/><button onClick={()=>pr.current?.click()} disabled={ul==="p"} style={{padding:"10px 20px",borderRadius:6,border:`1px dashed ${pu?T.g:T.ac}`,background:pu?"rgba(34,197,94,.06)":T.ag,color:pu?T.g:T.al,fontSize:12,cursor:"pointer",fontFamily:"inherit",fontWeight:600,width:"100%"}}>{ul==="p"?"Uploading...":pu?`✓ ${pf}`:"Choose PCAP file"}</button></div>
+      <div style={{flex:1,minWidth:280,padding:20,background:T.bgC,borderRadius:8,border:`1px solid ${T.bd}`,display:"flex",flexDirection:"column",justifyContent:"center"}}><div style={{fontSize:12,fontWeight:700,color:T.wh,marginBottom:10}}>3. Run Analysis</div><button onClick={run} disabled={!ru||!pu||rn} style={{padding:"10px 20px",borderRadius:6,border:"none",background:ru&&pu&&!rn?T.ac:T.td,color:"#fff",fontSize:12,cursor:ru&&pu&&!rn?"pointer":"default",fontFamily:"inherit",fontWeight:700,width:"100%"}}>{rn?"Running Suricata...":"Run Suricata + Rubric v3"}</button></div>
     </div>
-
-    {/* ── Table ── */}
-    <main style={{ maxWidth: 1600, margin: "0 auto", padding: "10px 32px 48px" }}>
-      <div style={{ overflowX: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: "0 3px" }}>
-          <thead><tr>
-            {COLUMNS.map(col => <th key={col.key} onClick={() => col.sort && handleSort(col.sort)} style={{ textAlign: col.align, padding: "7px 10px", fontWeight: 600, fontSize: 10, color: sortKey === col.sort ? T.accentLight : T.textMuted, textTransform: "uppercase", letterSpacing: ".08em", cursor: col.sort ? "pointer" : "default", userSelect: "none", whiteSpace: "nowrap", minWidth: col.min, borderBottom: sortKey === col.sort ? `2px solid ${T.accent}` : "2px solid transparent", transition: "color .15s" }} onMouseEnter={e => { if (col.sort) e.currentTarget.style.color = T.accentLight }} onMouseLeave={e => { if (col.sort) e.currentTarget.style.color = sortKey === col.sort ? T.accentLight : T.textMuted }}>{col.label}{col.sort && <Arrow k={col.sort} />}</th>)}
-          </tr></thead>
-          <tbody>
-            {paged.map(e => { const isX = expanded === e.id, c = sc(e.severity); return <React.Fragment key={e.id}>
-              <tr onClick={() => toggle(e.id)} style={{ cursor: "pointer", background: isX ? T.bgExpand : T.bgCard, borderLeft: `3px solid ${c.border}`, transition: "background .15s" }} onMouseEnter={ev => { if (!isX) ev.currentTarget.style.background = T.bgHover }} onMouseLeave={ev => { ev.currentTarget.style.background = isX ? T.bgExpand : T.bgCard }}>
-                <td style={{ padding: "9px 10px", whiteSpace: "nowrap" }}><span style={{ color: T.accentLight, fontWeight: 600, fontSize: 12 }}>{e.id}</span><div style={{ fontSize: 10, color: T.textDim }}>{e.year}</div></td>
-                <td style={{ padding: "9px 10px" }}><Badge severity={e.severity} /></td>
-                <td style={{ padding: "9px 10px" }}><CvssBar score={e.cvss3} /></td>
-                <td style={{ padding: "9px 10px" }}><EpssCell epss={e.epssScore} percentile={e.epssPercentile} /></td>
-                <td style={{ padding: "9px 10px" }}><ExploitBadges nuclei={e.hasNuclei} msf={e.hasMsf} edb={e.hasEdb} et={e.hasEt} /></td>
-                <td style={{ padding: "9px 10px", textAlign: "center" }}>{e.etCount > 0 ? <span style={{ color: T.cyan, fontWeight: 700, fontSize: 12 }}>{e.etCount}</span> : <span style={{ color: T.textDim }}>—</span>}</td>
-                <td style={{ padding: "9px 10px", textAlign: "center" }}><Chip icon="💬" count={e.postCount} color={e.postCount > 3 ? T.orange : T.textMuted} /></td>
-                <td style={{ padding: "9px 10px", textAlign: "center" }}><Chip icon="📦" count={e.repoCount} color={e.repoCount > 0 ? T.purple : T.textMuted} /></td>
-                <td style={{ padding: "9px 10px", fontSize: 11, maxWidth: 140 }}>{e.nucleiInfo ? <div><span style={{ color: T.green, fontWeight: 600 }}>{e.nucleiInfo.name ? e.nucleiInfo.name.slice(0, 28) + (e.nucleiInfo.name.length > 28 ? "…" : "") : "✓"}</span>{e.nucleiInfo.severity && <div style={{ fontSize: 9, color: T.textMuted, marginTop: 1 }}>{e.nucleiInfo.severity}</div>}</div> : <span style={{ color: T.textDim }}>—</span>}</td>
-                <td style={{ padding: "9px 10px", fontSize: 11, color: T.textMuted, maxWidth: 300 }}><div style={{ overflow: "hidden", textOverflow: "ellipsis", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", lineHeight: 1.5 }}>{e.desc || <span style={{ color: T.textDim, fontStyle: "italic" }}>No description</span>}</div></td>
-              </tr>
-
-              {/* ── Expanded detail ── */}
-              {isX && <tr><td colSpan={10} style={{ padding: "0 10px 10px", background: T.bgExpand }}>
-                <div style={{ padding: 16, background: "rgba(0,0,0,.25)", borderRadius: 8, border: `1px solid ${T.border}` }}>
-                  {/* Scores row */}
-                  <div style={{ marginBottom: 16, display: "flex", gap: 28, flexWrap: "wrap" }}>
-                    {e.epssScore != null && <div><div style={{ fontSize: 10, color: T.textMuted, textTransform: "uppercase", letterSpacing: ".1em", marginBottom: 3, fontWeight: 600 }}>EPSS</div><span style={{ fontSize: 20, fontWeight: 800, color: epsC(e.epssScore) }}>{(e.epssScore * 100).toFixed(3)}%</span>{e.epssPercentile != null && <span style={{ fontSize: 11, color: T.textMuted, marginLeft: 8 }}>({(e.epssPercentile * 100).toFixed(1)}th pctl)</span>}</div>}
-                    {e.cvss3 != null && <div><div style={{ fontSize: 10, color: T.textMuted, textTransform: "uppercase", letterSpacing: ".1em", marginBottom: 3, fontWeight: 600 }}>CVSS 3</div><span style={{ fontSize: 20, fontWeight: 800, color: e.cvss3 >= 9 ? T.red : e.cvss3 >= 7 ? T.orange : T.yellow }}>{e.cvss3.toFixed(1)}</span></div>}
-                  </div>
-
-                  {/* ET Rules */}
-                  {e.etRules && <div style={{ marginBottom: 16 }}><div style={{ fontSize: 10, color: T.textMuted, textTransform: "uppercase", letterSpacing: ".1em", marginBottom: 8, fontWeight: 600 }}>Emerging Threats Rules ({e.etRules.length})</div>
-                    {e.etRules.slice(0, 8).map((r, i) => <div key={i} style={{ padding: "7px 10px", background: "rgba(6,182,212,.04)", borderRadius: 5, border: "1px solid rgba(6,182,212,.1)", marginBottom: 3, fontSize: 11 }}>
-                      <span style={{ color: T.cyan, fontWeight: 600 }}>SID:{r.sid}</span>
-                      <span style={{ color: T.text, marginLeft: 8 }}>{r.msg}</span>
-                      {r.classtype && <span style={{ color: T.textDim, marginLeft: 8, fontSize: 10 }}>({r.classtype})</span>}
-                    </div>)}
-                  </div>}
-
-                  {/* Nuclei */}
-                  {e.nucleiInfo && <div style={{ marginBottom: 16 }}><div style={{ fontSize: 10, color: T.textMuted, textTransform: "uppercase", letterSpacing: ".1em", marginBottom: 8, fontWeight: 600 }}>Nuclei Template</div><div style={{ padding: "8px 10px", background: "rgba(168,85,247,.04)", borderRadius: 5, border: "1px solid rgba(168,85,247,.12)", fontSize: 11 }}>
-                    {e.nucleiInfo.name && <div style={{ color: "#c084fc", fontWeight: 600, marginBottom: 3 }}>{e.nucleiInfo.name}</div>}
-                    {e.nucleiInfo.severity && <span style={{ color: T.textMuted }}>Severity: {e.nucleiInfo.severity} </span>}
-                    {e.nucleiInfo.file_path && <div style={{ marginTop: 4 }}><a href={`https://github.com/projectdiscovery/nuclei-templates/blob/main/${e.nucleiInfo.file_path}`} target="_blank" rel="noopener noreferrer" style={{ color: T.purple, textDecoration: "none", fontSize: 10, fontWeight: 500 }}>View template →</a></div>}
-                    {e.nucleiInfo.url && <div style={{ marginTop: 4 }}><a href={e.nucleiInfo.url} target="_blank" rel="noopener noreferrer" style={{ color: T.purple, textDecoration: "none", fontSize: 10 }}>{e.nucleiInfo.url}</a></div>}
-                  </div></div>}
-
-                  {/* Metasploit */}
-                  {e.msfModules && <div style={{ marginBottom: 16 }}><div style={{ fontSize: 10, color: T.textMuted, textTransform: "uppercase", letterSpacing: ".1em", marginBottom: 8, fontWeight: 600 }}>Metasploit Modules ({e.msfModules.length})</div>
-                    {e.msfModules.slice(0, 5).map((m, i) => <div key={i} style={{ padding: "7px 10px", background: "rgba(239,68,68,.04)", borderRadius: 5, border: "1px solid rgba(239,68,68,.1)", marginBottom: 3, fontSize: 11 }}>
-                      <div style={{ color: "#f87171", fontWeight: 600 }}>{m.name}</div>
-                      <div style={{ color: T.textDim, fontSize: 10, marginTop: 1 }}>{m.path}</div>
-                    </div>)}
-                  </div>}
-
-                  {/* Exploit-DB */}
-                  {e.edbEntries && <div style={{ marginBottom: 16 }}><div style={{ fontSize: 10, color: T.textMuted, textTransform: "uppercase", letterSpacing: ".1em", marginBottom: 8, fontWeight: 600 }}>Exploit-DB ({e.edbEntries.length})</div>
-                    {e.edbEntries.slice(0, 5).map((x, i) => <div key={i} style={{ padding: "7px 10px", background: "rgba(251,191,36,.04)", borderRadius: 5, border: "1px solid rgba(251,191,36,.1)", marginBottom: 3, fontSize: 11 }}>
-                      <a href={x.url} target="_blank" rel="noopener noreferrer" style={{ color: T.orange, textDecoration: "none", fontWeight: 600 }}>EDB-{x.id}</a>
-                      <span style={{ color: T.textMuted, marginLeft: 8 }}>{x.title}</span>
-                      {x.date && <span style={{ color: T.textDim, marginLeft: 6, fontSize: 10 }}>({x.date})</span>}
-                    </div>)}
-                  </div>}
-
-                  {/* Description */}
-                  {e.desc && <div style={{ marginBottom: 16 }}><div style={{ fontSize: 10, color: T.textMuted, textTransform: "uppercase", letterSpacing: ".1em", marginBottom: 8, fontWeight: 600 }}>Full Description</div><div style={{ fontSize: 12, color: T.text, lineHeight: 1.6 }}>{e.desc}</div></div>}
-
-                  {/* Posts */}
-                  {e.posts?.length > 0 && <div style={{ marginBottom: 16 }}><div style={{ fontSize: 10, color: T.textMuted, textTransform: "uppercase", letterSpacing: ".1em", marginBottom: 8, fontWeight: 600 }}>Fediverse Posts ({e.posts.length})</div>
-                    {e.posts.slice(0, 5).map((p, i) => <div key={i} style={{ padding: "8px 10px", background: "rgba(255,255,255,.02)", borderRadius: 5, marginBottom: 4, borderLeft: `2px solid ${T.border}` }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}><span style={{ color: T.accentLight, fontSize: 11 }}>@{p.account?.acct || "unknown"}</span><span style={{ color: T.textDim, fontSize: 10 }}>{timeAgo(p.created_at)}</span></div>
-                      <div style={{ fontSize: 11, color: T.textMuted, lineHeight: 1.5 }}>{strip(p.content).slice(0, 280)}{strip(p.content).length > 280 ? "…" : ""}</div>
-                      {p.url && <a href={p.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 10, color: T.accent, textDecoration: "none", marginTop: 3, display: "inline-block" }}>View post →</a>}
-                    </div>)}
-                  </div>}
-
-                  {/* Repos */}
-                  {e.repos?.length > 0 && <div><div style={{ fontSize: 10, color: T.textMuted, textTransform: "uppercase", letterSpacing: ".1em", marginBottom: 8, fontWeight: 600 }}>Repositories ({e.repos.length})</div>
-                    {e.repos.slice(0, 5).map((r, i) => <div key={i} style={{ padding: "6px 10px", background: "rgba(255,255,255,.02)", borderRadius: 5, marginBottom: 3 }}><a href={r.url || r} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11, color: T.purple, textDecoration: "none", wordBreak: "break-all" }}>📦 {typeof r === "string" ? r : r.url || JSON.stringify(r)}</a></div>)}
-                  </div>}
-                </div>
-              </td></tr>}
-            </React.Fragment> })}
-          </tbody>
-        </table>
+    {er&&<div style={{padding:"10px 14px",background:"rgba(239,68,68,.08)",border:"1px solid rgba(239,68,68,.2)",borderRadius:6,fontSize:11,color:T.r,marginBottom:16}}>{er}</div>}
+    {S&&<>
+      <div style={{display:"flex",gap:12,marginBottom:20,flexWrap:"wrap"}}>{[{l:"Rules",v:S.total_rules,c:T.wh},{l:"Profiled",v:S.profiled_rules||0,c:T.cy},{l:"Alerts",v:S.total_alerts,c:T.o},{l:"Retire",v:S.retire_count,c:T.r},{l:"Review",v:S.review_count,c:T.o},{l:"Keep",v:S.keep_count,c:T.g},{l:"CISA KEV",v:S.kev_hits,c:T.r},{l:"Suricata",v:S.suricata_elapsed_sec+"s",c:T.cy}].map(x=><div key={x.l} style={{flex:1,minWidth:100,padding:"12px 14px",background:T.bgC,borderRadius:8,border:`1px solid ${T.bd}`}}><div style={{fontSize:9,color:T.tm,textTransform:"uppercase",letterSpacing:".1em",fontWeight:600}}>{x.l}</div><div style={{fontSize:20,fontWeight:800,color:x.c,marginTop:4}}>{x.v}</div></div>)}</div>
+      <div style={{display:"flex",gap:16,marginBottom:20,flexWrap:"wrap"}}>
+        <div style={{flex:2,minWidth:400,padding:16,background:T.bgC,borderRadius:8,border:`1px solid ${T.bd}`}}><div style={{fontSize:11,fontWeight:700,color:T.wh,marginBottom:12}}>Ruleset Growth (Cumulative)</div><LnCh data={S.growth}/></div>
+        <div style={{flex:1,minWidth:200,padding:16,background:T.bgC,borderRadius:8,border:`1px solid ${T.bd}`,display:"flex",flexDirection:"column",alignItems:"center"}}><div style={{fontSize:11,fontWeight:700,color:T.wh,marginBottom:12}}>CVE vs Malware</div><Pie a={S.type_counts?.CVE||0} b={S.type_counts?.MALWARE||0}/><div style={{display:"flex",gap:16,marginTop:12}}><div style={{display:"flex",alignItems:"center",gap:5}}><div style={{width:10,height:10,borderRadius:2,background:T.cy}}/><span style={{fontSize:10,color:T.tm}}>CVE ({S.type_counts?.CVE})</span></div><div style={{display:"flex",alignItems:"center",gap:5}}><div style={{width:10,height:10,borderRadius:2,background:T.p}}/><span style={{fontSize:10,color:T.tm}}>Malware ({S.type_counts?.MALWARE})</span></div></div></div>
       </div>
-      {filtered.length === 0 && <div style={{ textAlign: "center", padding: 64, color: T.textDim }}><div style={{ fontSize: 32, marginBottom: 12 }}>∅</div><div style={{ fontSize: 13 }}>No CVEs match your filters</div></div>}
-      {totalP > 1 && <div style={{ display: "flex", justifyContent: "center", marginTop: 20 }}><Pager /></div>}
-    </main>
+      <div style={{display:"flex",gap:8,marginBottom:14,alignItems:"center",flexWrap:"wrap"}}>{["ALL","RETIRE","REVIEW","KEEP"].map(f=><button key={f} onClick={()=>setFt(f)} style={{padding:"4px 12px",borderRadius:4,border:`1px solid ${ft===f?(RC[f]||T.ac):T.bd}`,background:ft===f?"rgba(255,255,255,.05)":"transparent",color:ft===f?(RC[f]||T.al):T.td,fontSize:10,fontFamily:"inherit",cursor:"pointer",fontWeight:ft===f?700:400}}>{f}{f!=="ALL"&&` (${f==="RETIRE"?S.retire_count:f==="REVIEW"?S.review_count:S.keep_count})`}</button>)}<div style={{flex:1}}/><input type="text" placeholder="Search SID, msg, CVE..." value={sq} onChange={e=>setSq(e.target.value)} style={{width:240,padding:"7px 12px",background:"rgba(255,255,255,.03)",border:`1px solid ${T.bd}`,borderRadius:6,color:T.wh,fontSize:11,fontFamily:"inherit"}}/></div>
+      <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"separate",borderSpacing:"0 3px"}}><thead><tr>{[{k:"sid",l:"SID",s:1},{k:"score",l:"Score",s:1},{k:"v",l:"Verdict"},{k:"t",l:"Type"},{k:"checks",l:"Checks",s:1},{k:"msg",l:"Message"},{k:"cves",l:"CVEs"},{k:"epss",l:"EPSS",s:1},{k:"kev",l:"KEV"}].map(h=><th key={h.k} onClick={()=>h.s&&hs(h.k)} style={{textAlign:"left",padding:"7px 10px",fontWeight:600,fontSize:10,color:sb===h.k?T.al:T.tm,textTransform:"uppercase",letterSpacing:".08em",cursor:h.s?"pointer":"default",userSelect:"none",borderBottom:sb===h.k?`2px solid ${T.ac}`:"2px solid transparent"}}>{h.l}{h.s&&<AD sk={sb} k={h.k} sd={sd}/>}</th>)}</tr></thead>
+      <tbody>{fR.map(r=>{const ix=xs===r.sid,rc=RC[r.verdict]||T.tm;return<React.Fragment key={r.sid}>
+        <tr onClick={()=>setXs(ix?null:r.sid)} style={{cursor:"pointer",background:ix?T.bgX:T.bgC,borderLeft:`3px solid ${rc}`}} onMouseEnter={v=>{if(!ix)v.currentTarget.style.background=T.bgH}} onMouseLeave={v=>{v.currentTarget.style.background=ix?T.bgX:T.bgC}}>
+          <td style={{padding:"8px 10px",color:T.al,fontSize:12,fontWeight:600}}>{r.sid}</td>
+          <td style={{padding:"8px 10px"}}>{r.rubric_score!=null?<span style={{fontSize:16,fontWeight:800,color:r.rubric_score<9?T.r:r.rubric_score<=10?T.o:T.g}}>{r.rubric_score}/17</span>:<span style={{fontSize:11,color:T.tm}}>{r.rubric_detail?.exceeded?"EXCEEDED":"OK"}</span>}</td>
+          <td style={{padding:"8px 10px"}}><span style={{padding:"2px 8px",borderRadius:4,background:`${rc}22`,border:`1px solid ${rc}44`,color:rc,fontSize:10,fontWeight:700}}>{r.verdict}</span></td>
+          <td style={{padding:"8px 10px"}}><span style={{fontSize:10,color:r.sig_type==="CVE"?T.cy:T.p,fontWeight:600}}>{r.sig_type}</span></td>
+          <td style={{padding:"8px 10px",color:r.checks>0?T.o:T.td,fontWeight:600,fontSize:12}}>{r.checks}</td>
+          <td style={{padding:"8px 10px",fontSize:11,color:T.tx,maxWidth:300}}><div style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.msg}</div></td>
+          <td style={{padding:"8px 10px",fontSize:11}}>{r.cves?.length?<span style={{color:T.al}}>{r.cves.join(", ")}</span>:<span style={{color:T.td}}>—</span>}</td>
+          <td style={{padding:"8px 10px"}}>{r.enrichment?.epss_score!=null?<span style={{color:eC(r.enrichment.epss_score),fontSize:11,fontWeight:700}}>{(r.enrichment.epss_score*100).toFixed(2)}%</span>:<span style={{color:T.td}}>—</span>}</td>
+          <td style={{padding:"8px 10px"}}>{r.enrichment?.is_kev?<span style={{color:T.r,fontWeight:700,fontSize:10}}>KEV</span>:<span style={{color:T.td}}>—</span>}</td>
+        </tr>
+        {ix&&<tr><td colSpan={9} style={{padding:"0 10px 10px",background:T.bgX}}><div style={{padding:16,background:"rgba(0,0,0,.25)",borderRadius:8,border:`1px solid ${T.bd}`}}>
+          {r.sig_type==="CVE"&&r.rubric_detail&&<div style={{marginBottom:16}}><div style={{fontSize:10,color:T.tm,textTransform:"uppercase",marginBottom:8,fontWeight:600}}>Rubric v3 — CVSS Retention</div><div style={{display:"flex",gap:12,flexWrap:"wrap"}}>{[{l:"CVSS",v:`${r.rubric_detail.cvss} (${r.rubric_detail.severity_label})`,c:r.rubric_detail.cvss>=9?T.r:r.rubric_detail.cvss>=7?T.o:T.y},{l:"Year",v:r.rubric_detail.sig_year,c:T.wh},{l:"Age",v:r.rubric_detail.age_years+"yr",c:r.rubric_detail.exceeded?T.r:T.g},{l:"Retention",v:r.rubric_detail.retention_years+"yr",c:T.wh},{l:"Status",v:r.rubric_detail.exceeded?"EXCEEDED":"OK",c:r.rubric_detail.exceeded?T.r:T.g}].map(x=><div key={x.l} style={{padding:"8px 12px",background:"rgba(255,255,255,.02)",borderRadius:6,border:`1px solid ${T.bd}`,minWidth:90}}><div style={{fontSize:9,color:T.td,textTransform:"uppercase"}}>{x.l}</div><div style={{fontSize:16,fontWeight:800,color:x.c,marginTop:2}}>{x.v}</div></div>)}</div></div>}
+          {r.sig_type==="MALWARE"&&r.rubric_breakdown&&<div style={{marginBottom:16}}><div style={{fontSize:10,color:T.tm,textTransform:"uppercase",marginBottom:10,fontWeight:600}}>Rubric v3 — Malware: <span style={{color:r.rubric_score<9?T.r:r.rubric_score<=10?T.o:T.g,fontSize:14}}>{r.rubric_score}/17</span></div><div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{Object.entries(r.rubric_breakdown).map(([k,v])=><div key={k} style={{padding:"6px 10px",background:"rgba(255,255,255,.02)",borderRadius:6,border:`1px solid ${T.bd}`,minWidth:110}}><div style={{fontSize:8,color:T.td,textTransform:"uppercase"}}>{k.replace(/_/g," ")}</div><span style={{fontSize:14,fontWeight:800,color:v.score>0?T.g:v.score<0?T.r:T.tm}}>{v.score>0?"+":""}{v.score}</span> <span style={{fontSize:9,color:T.tm}}>{v.label}</span></div>)}</div></div>}
+          <div style={{marginBottom:12,display:"flex",gap:12,flexWrap:"wrap"}}><div style={{padding:"5px 10px",background:"rgba(255,255,255,.02)",borderRadius:5,border:`1px solid ${T.bd}`}}><span style={{fontSize:9,color:T.td}}>CHECKS </span><span style={{fontSize:13,fontWeight:700,color:T.wh}}>{r.checks}</span></div><div style={{padding:"5px 10px",background:"rgba(255,255,255,.02)",borderRadius:5,border:`1px solid ${T.bd}`}}><span style={{fontSize:9,color:T.td}}>MATCHES </span><span style={{fontSize:13,fontWeight:700,color:r.matches>0?T.g:T.r}}>{r.matches}</span></div><div style={{padding:"5px 10px",background:"rgba(255,255,255,.02)",borderRadius:5,border:`1px solid ${T.bd}`}}><span style={{fontSize:9,color:T.td}}>ALERTS </span><span style={{fontSize:13,fontWeight:700,color:r.alerts>0?T.o:T.td}}>{r.alerts}</span></div></div>
+          {r.enrichment?.is_kev&&r.enrichment.kev_info&&<div style={{padding:"8px 12px",background:"rgba(239,68,68,.06)",borderRadius:6,border:"1px solid rgba(239,68,68,.15)",marginBottom:12,fontSize:11}}><span style={{color:T.r,fontWeight:700}}>CISA KEV:</span> <span style={{color:T.tx}}>{r.enrichment.kev_info.name}</span></div>}
+          <div style={{fontSize:11,color:T.tm}}><strong>msg:</strong> {r.msg}</div>
+          <div style={{fontSize:10,color:T.td,marginTop:4}}>classtype: {r.classtype} · target: {r.target_type} · product: {r.affected_product||"—"} · created: {r.created_at||"—"}</div>
+          {r.enrichment&&<div style={{display:"flex",gap:5,marginTop:8,flexWrap:"wrap"}}>{r.enrichment.has_nuclei&&<span style={{padding:"2px 7px",borderRadius:3,background:"rgba(168,85,247,.1)",color:"#c084fc",fontSize:9,fontWeight:600}}>Nuclei ✓</span>}{r.enrichment.has_msf&&<span style={{padding:"2px 7px",borderRadius:3,background:"rgba(239,68,68,.1)",color:"#f87171",fontSize:9,fontWeight:600}}>MSF ✓</span>}{r.enrichment.has_edb&&<span style={{padding:"2px 7px",borderRadius:3,background:"rgba(251,191,36,.1)",color:"#fbbf24",fontSize:9,fontWeight:600}}>EDB ✓</span>}{r.enrichment.has_et&&<span style={{padding:"2px 7px",borderRadius:3,background:"rgba(6,182,212,.1)",color:"#22d3ee",fontSize:9,fontWeight:600}}>ET ✓</span>}</div>}
+        </div></td></tr>}
+      </React.Fragment>})}</tbody></table></div>
+      {fR.length===0&&<div style={{textAlign:"center",padding:40,color:T.td}}>No rules match</div>}
+    </>}
+    {!S&&!rn&&<div style={{textAlign:"center",padding:60,color:T.td}}><div style={{fontSize:28,marginBottom:12}}>📋</div><div>Upload a ruleset and PCAP to begin analysis</div></div>}
+  </div>;
+}
+
+// ═══ MAIN ═══
+export default function App(){
+  const[tab,setTab]=useState("feed");
+  return<div style={{minHeight:"100vh",background:T.bg,color:T.tx,fontFamily:"'Inter','Segoe UI',system-ui,sans-serif"}}>
+    <style>{`@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}::-webkit-scrollbar{width:5px}::-webkit-scrollbar-track{background:${T.bg}}::-webkit-scrollbar-thumb{background:${T.bd};border-radius:3px}::selection{background:rgba(37,99,235,.3)}input:focus{outline:none;border-color:${T.ac}!important;box-shadow:0 0 0 2px ${T.ag}}`}</style>
+    <header style={{background:`linear-gradient(180deg,${T.bgC},${T.bg})`,borderBottom:`1px solid ${T.bd}`,padding:"16px 32px",position:"sticky",top:0,zIndex:50,backdropFilter:"blur(16px)"}}><div style={{maxWidth:1600,margin:"0 auto",display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:12}}>
+      <div style={{display:"flex",alignItems:"center",gap:14}}><div style={{width:36,height:36,borderRadius:8,background:`linear-gradient(135deg,${T.ac},#1d4ed8)`,display:"flex",alignItems:"center",justifyContent:"center",boxShadow:`0 0 20px ${T.ag}`}}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v7M12 15v7M2 12h7M15 12h7M4.93 4.93l4.95 4.95M14.12 14.12l4.95 4.95M4.93 19.07l4.95-4.95M14.12 9.88l4.95-4.95"/></svg></div><h1 style={{fontSize:20,fontWeight:800,color:T.wh,letterSpacing:"-.02em"}}>Arachnid Intel</h1></div>
+      <div style={{display:"flex",gap:4}}>{[{id:"feed",l:"CVE Feed",i:"📡"},{id:"analysis",l:"Ruleset Analysis",i:"🔬"}].map(t=><button key={t.id} onClick={()=>setTab(t.id)} style={{padding:"8px 18px",borderRadius:6,border:`1px solid ${tab===t.id?T.ac:T.bd}`,background:tab===t.id?T.ag:"transparent",color:tab===t.id?T.al:T.tm,fontSize:12,fontFamily:"inherit",cursor:"pointer",fontWeight:tab===t.id?700:400,display:"flex",alignItems:"center",gap:6}}>{t.i} {t.l}</button>)}</div>
+    </div></header>
+    <main style={{maxWidth:1600,margin:"0 auto",padding:"20px 32px 48px"}}>{tab==="feed"?<CveTab/>:<ATab/>}</main>
   </div>;
 }
