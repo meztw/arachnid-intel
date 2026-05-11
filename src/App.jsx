@@ -7,7 +7,7 @@ const T = {
   r:"#ef4444", o:"#f59e0b", y:"#eab308", g:"#22c55e", p:"#a855f7", cy:"#06b6d4",
 };
 
-const FEED_URL = "https://fedisecfeeds.github.io/feed.json";
+const FEED_URL = "https://fedisecfeeds.github.io/fedi_cve_feed.json";
 
 const sevColor = (s) => {
   const x = (s || "").toLowerCase();
