@@ -249,7 +249,13 @@ function CveFeedTab() {
         fetchJson("/api/kev"),
         fetchJson("/api/cache/timestamps"),
       ]);
-      setFeed(Array.isArray(f) ? f : (f.entries || f.data || []));
+      // FediSec feed is an object keyed by CVE ID — convert to array with id baked in.
+      let entries;
+      if (Array.isArray(f)) entries = f;
+      else if (f && typeof f === "object" && (f.entries || f.data)) entries = f.entries || f.data;
+      else if (f && typeof f === "object") entries = Object.entries(f).map(([k, v]) => ({ cve_id: k, ...(v || {}) }));
+      else entries = [];
+      setFeed(entries);
       setEpss(e); setNuclei(n); setMsf(m); setEdb(x); setEt(etr); setKev(k);
       setTimestamps(ts);
     } catch (err) {
@@ -283,26 +289,30 @@ function CveFeedTab() {
   const enriched = useMemo(() => {
     return (feed || []).map((row) => {
       const id = row.cve_id || row.id || row.cve || "";
+      // Prefer cached EPSS API value; fall back to the feed's own epss field.
       const e = epss[id] || {};
+      const feedEpss = row.epss != null ? parseFloat(row.epss) : null;
+      const apiEpss = e.epss != null ? parseFloat(e.epss) : null;
       const n = nuclei[id];
       const m = msf[id];
       const x = edb[id];
       const k = kev[id];
       const etRow = et[id];
       const inhouse = inhouseMap[id];
-      const cvss = parseFloat(row.cvss_score || row.cvss || row.cvssv3 || 0) || null;
+      const cvss = parseFloat(row.cvss3 ?? row.cvss_score ?? row.cvss ?? row.cvssv3 ?? 0) || null;
       return {
         ...row,
         _id: id,
         _cvss: cvss,
-        _epss: e.epss != null ? parseFloat(e.epss) : null,
+        _epss: apiEpss != null ? apiEpss : feedEpss,
         _epss_pct: e.percentile != null ? parseFloat(e.percentile) : null,
-        _nuclei: !!n, _msf: !!m, _edb: !!x, _kev: !!k, _et: !!etRow,
+        _nuclei: !!(n || row.nuclei), _msf: !!m, _edb: !!x, _kev: !!k, _et: !!etRow,
         _inhouse: inhouse,
         _year: (id.match(/CVE-(\d{4})/) || [])[1] || "",
         _desc: row.description || row.summary || "",
         _posts: row.posts || row.fediverse_posts || [],
         _repos: row.repos || row.github_repos || [],
+        _updated: row.updated || row.updated_at || "",
       };
     });
   }, [feed, epss, nuclei, msf, edb, kev, et, inhouseMap]);
