@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
 Arachnid Intel — API
-Suricata 5.0.10 compiled with --enable-profiling for rule_perf.log
-Rubric v3 scoring, inhouse rules coverage
+Suricata 5.0.10 with --enable-profiling
+Rubric v3, flowbit tracking, 3-way type classification
 """
 
 import os, json, re, subprocess, shutil, time, collections
@@ -35,39 +35,87 @@ def load_cache(n):
         with open(os.path.join(CACHE_DIR, f"{n}.json")) as f: return json.load(f)
     except: return {}
 
+def get_cache_timestamps():
+    ts = {}
+    for name in ["epss","nuclei","metasploit","exploitdb","et_rules","kev"]:
+        path = os.path.join(CACHE_DIR, f"{name}.json")
+        try:
+            ts[name] = os.path.getmtime(path)
+        except: ts[name] = None
+    return ts
+
 def xm(line, field):
     m = re.search(rf'{field}\s+([^,;)\s]+)', line)
     return m.group(1).strip() if m else ""
 
-def parse_rules(content):
-    rules = []
+def parse_rules_full(content):
+    """Parse rules including disabled (commented) rules and flowbits."""
+    active = []; disabled = []; all_rules = []
     for line in content.splitlines():
         line = line.strip()
-        if not line or line.startswith("#"): continue
-        r = {"raw": line}
-        m = re.search(r'\bsid:\s*(\d+)', line)
+        if not line: continue
+        is_disabled = line.startswith("#")
+        raw = line.lstrip("# ") if is_disabled else line
+
+        r = {"raw": raw, "disabled": is_disabled}
+        m = re.search(r'\bsid:\s*(\d+)', raw)
         r["sid"] = m.group(1) if m else None
         if not r["sid"]: continue
-        m = re.search(r'msg:\s*"([^"]*)"', line)
+
+        m = re.search(r'msg:\s*"([^"]*)"', raw)
         r["msg"] = m.group(1) if m else ""
-        r["cves"] = [f"CVE-{c}" for c in re.findall(r'reference:\s*cve\s*,\s*(\d{4}-\d+)', line, re.I)]
-        m = re.search(r'classtype:\s*([^;]+)', line)
+        r["cves"] = [f"CVE-{c}" for c in re.findall(r'reference:\s*cve\s*,\s*(\d{4}-\d+)', raw, re.I)]
+        m = re.search(r'classtype:\s*([^;]+)', raw)
         r["classtype"] = m.group(1).strip() if m else ""
-        r["created_at"] = xm(line, "created_at") or None
-        r["signature_severity"] = xm(line, "signature_severity") or None
-        r["affected_product"] = xm(line, "affected_product") or None
-        r["attack_target"] = xm(line, "attack_target") or None
-        r["performance_impact"] = xm(line, "performance_impact") or "Low"
-        r["tag"] = xm(line, r"\btag") or ""
-        r["cvssv3"] = xm(line, "cvssv3") or None
-        hdr = re.match(r'(\w+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)', line)
+        r["created_at"] = xm(raw, "created_at") or None
+        r["signature_severity"] = xm(raw, "signature_severity") or None
+        r["affected_product"] = xm(raw, "affected_product") or None
+        r["attack_target"] = xm(raw, "attack_target") or None
+        r["performance_impact"] = xm(raw, "performance_impact") or "Low"
+        r["tag"] = xm(raw, r"\btag") or ""
+        r["cvssv3"] = xm(raw, "cvssv3") or None
+
+        hdr = re.match(r'(\w+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)', raw)
         r["dst_net"] = hdr.group(6) if hdr else ""
         atk = r.get("attack_target") or ""
         dst = r.get("dst_net") or ""
         r["target_type"] = "Server" if ("$HOME_NET" in dst or "Server" in atk or "Web_Server" in atk) else "Client"
-        r["has_pcre"] = "pcre:" in line
-        rules.append(r)
-    return rules
+        r["has_pcre"] = "pcre:" in raw
+
+        # Flowbits
+        fb_set = re.findall(r'flowbits:\s*set\s*,\s*([^;,]+)', raw, re.I)
+        fb_isset = re.findall(r'flowbits:\s*isset\s*,\s*([^;,]+)', raw, re.I)
+        fb_unset = re.findall(r'flowbits:\s*unset\s*,\s*([^;,]+)', raw, re.I)
+        fb_toggle = re.findall(r'flowbits:\s*toggle\s*,\s*([^;,]+)', raw, re.I)
+        fb_noalert = bool(re.search(r'flowbits:\s*noalert', raw, re.I))
+        r["flowbits"] = {
+            "set": [x.strip() for x in fb_set],
+            "isset": [x.strip() for x in fb_isset],
+            "unset": [x.strip() for x in fb_unset],
+            "toggle": [x.strip() for x in fb_toggle],
+            "noalert": fb_noalert,
+        }
+        r["has_flowbits"] = bool(fb_set or fb_isset or fb_unset or fb_toggle or fb_noalert)
+
+        # Type classification: CVE, MALWARE, or CVE+MALWARE
+        has_cve = len(r["cves"]) > 0
+        tag_lower = (r["tag"] or "").lower()
+        ct_lower = (r["classtype"] or "").lower()
+        is_malware = tag_lower in ("malware",) or ct_lower in ("domain-c2", "trojan-activity")
+        if has_cve and is_malware:
+            r["sig_type"] = "CVE+MALWARE"
+        elif has_cve:
+            r["sig_type"] = "CVE"
+        else:
+            r["sig_type"] = "MALWARE"
+
+        all_rules.append(r)
+        if is_disabled:
+            disabled.append(r)
+        else:
+            active.append(r)
+
+    return all_rules, active, disabled
 
 def get_year(rule, field="created_at"):
     v = rule.get(field) or ""
@@ -153,95 +201,112 @@ def enrich_rule(rule, epss, nuclei, msf, edb, kev, et):
     return e
 
 def parse_perf(log_dir):
-    """Parse rule_perf.log — handles both plain text table and JSON formats."""
     perf = {}
     log_path = None
     for root, _, files in os.walk(log_dir):
         for f in files:
             if "rule_perf" in f:
-                log_path = os.path.join(root, f)
-                break
+                log_path = os.path.join(root, f); break
         if log_path: break
     if not log_path: return perf
-
-    with open(log_path) as f:
-        content = f.read().strip()
-
-    # JSON format: multiple JSON objects concatenated (one per sort order)
+    with open(log_path) as f: content = f.read().strip()
     if content.startswith("{"):
-        decoder = json.JSONDecoder()
-        pos = 0
-        first_section = True
+        decoder = json.JSONDecoder(); pos = 0
         while pos < len(content):
             try:
                 obj, end = decoder.raw_decode(content, pos)
-                # Only use the FIRST sort section (sorted by ticks = worst performers)
-                if first_section:
-                    for rule in obj.get("rules", []):
-                        sid = str(rule.get("signature_id", ""))
-                        if sid:
-                            perf[sid] = {
-                                "checks": rule.get("checks", 0),
-                                "matches": rule.get("matches", 0),
-                                "avgticks": str(rule.get("ticks_avg", rule.get("avgticks", 0))),
-                            }
-                    first_section = False
+                for rule in obj.get("rules", []):
+                    sid = str(rule.get("signature_id", ""))
+                    if sid:
+                        checks = rule.get("checks", 0)
+                        if sid not in perf or checks > perf[sid].get("checks", 0):
+                            perf[sid] = {"checks": checks, "matches": rule.get("matches", 0), "avgticks": str(rule.get("ticks_avg", 0))}
                 pos = end
-                while pos < len(content) and content[pos] in ' \n\r\t':
-                    pos += 1
-            except json.JSONDecodeError:
-                pos += 1
-        return perf
-
-    # Plain text table format
-    for line in content.splitlines():
-        line = line.strip()
-        if not line or line.startswith("-") or line.startswith("N") or line.startswith("=") or line.startswith("Date"):
-            continue
-        parts = line.split()
-        if len(parts) < 8: continue
-        try:
-            int(parts[0])
-            sid = parts[1]; int(sid)
-        except ValueError: continue
-        try:
-            perf[sid] = {
-                "checks": int(parts[6]),
-                "matches": int(parts[7]),
-                "avgticks": parts[9] if len(parts) > 9 else "0"
-            }
-        except (ValueError, IndexError): continue
+                while pos < len(content) and content[pos] in ' \n\r\t': pos += 1
+            except json.JSONDecodeError: pos += 1
+    else:
+        for line in content.splitlines():
+            line = line.strip()
+            if not line or line.startswith("-") or line.startswith("N") or line.startswith("=") or line.startswith("Date"): continue
+            parts = line.split()
+            if len(parts) < 8: continue
+            try: int(parts[0]); sid = parts[1]; int(sid)
+            except ValueError: continue
+            try: perf[sid] = {"checks": int(parts[6]), "matches": int(parts[7]), "avgticks": parts[9] if len(parts) > 9 else "0"}
+            except: continue
     return perf
 
+def build_flowbit_map(rules):
+    """Build bidirectional flowbit dependency map: set→isset and isset→set."""
+    set_map = {}   # flowbit_name → [sids that SET it]
+    isset_map = {} # flowbit_name → [sids that ISSET it]
+    for r in rules:
+        sid = r["sid"]
+        fb = r.get("flowbits", {})
+        for name in fb.get("set", []):
+            set_map.setdefault(name, []).append(sid)
+        for name in fb.get("isset", []):
+            isset_map.setdefault(name, []).append(sid)
+    # For each rule, find connected rules
+    connections = {}
+    for r in rules:
+        sid = r["sid"]; fb = r.get("flowbits", {}); conn = []
+        for name in fb.get("set", []):
+            for dep_sid in isset_map.get(name, []):
+                if dep_sid != sid: conn.append({"sid": dep_sid, "rel": "isset", "flowbit": name})
+        for name in fb.get("isset", []):
+            for src_sid in set_map.get(name, []):
+                if src_sid != sid: conn.append({"sid": src_sid, "rel": "set", "flowbit": name})
+        if conn: connections[sid] = conn
+    return connections
 
-# ── Inhouse Rules ──
+
+# ── Routes ──
+
+@app.route("/api/cache/timestamps")
+def cache_timestamps():
+    ts = get_cache_timestamps()
+    result = {}
+    for k, v in ts.items():
+        if v:
+            import datetime
+            result[k] = datetime.datetime.fromtimestamp(v).isoformat()
+        else:
+            result[k] = None
+    return jsonify(result)
+
+@app.route("/api/cache/refresh", methods=["POST"])
+def cache_refresh():
+    try:
+        res = subprocess.run(["/usr/local/bin/fetch-data.sh"], capture_output=True, text=True, timeout=300)
+        return jsonify({"ok": res.returncode == 0, "output": (res.stdout or "")[-1000:]})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
 
 @app.route("/api/inhouse/upload", methods=["POST"])
 def upload_inhouse():
     if "file" not in request.files: return jsonify({"error": "No file"}), 400
     f = request.files["file"]
     content = f.read().decode("utf-8", errors="replace")
-    rules = parse_rules(content)
+    _, active, _ = parse_rules_full(content)
     cve_map = {}
-    for r in rules:
+    for r in active:
         for cve in r.get("cves", []):
-            cve_map.setdefault(cve, []).append({
-                "sid": r["sid"], "msg": r["msg"],
-                "classtype": r["classtype"], "severity": r.get("signature_severity", ""),
-            })
-    return jsonify({"filename": f.filename, "rule_count": len(rules), "cve_count": len(cve_map), "cve_coverage": cve_map})
-
-
-# ── Analysis Routes ──
+            cve_map.setdefault(cve, []).append({"sid": r["sid"], "msg": r["msg"], "classtype": r["classtype"], "severity": r.get("signature_severity", "")})
+    return jsonify({"filename": f.filename, "rule_count": len(active), "cve_count": len(cve_map), "cve_coverage": cve_map})
 
 @app.route("/api/analysis/upload-rules", methods=["POST"])
 def upload_rules():
     if "file" not in request.files: return jsonify({"error": "No file"}), 400
     f = request.files["file"]
     content = f.read().decode("utf-8", errors="replace")
-    rules = parse_rules(content)
-    with open(os.path.join(UPLOAD_DIR, "current.rules"), "w") as out: out.write(content)
-    return jsonify({"filename": f.filename, "rule_count": len(rules)})
+    all_r, active, disabled = parse_rules_full(content)
+    # Save only active rules for Suricata run
+    active_content = "\n".join(r["raw"] for r in active)
+    with open(os.path.join(UPLOAD_DIR, "current.rules"), "w") as out: out.write(active_content)
+    # Save full content for analysis
+    with open(os.path.join(UPLOAD_DIR, "current_full.rules"), "w") as out: out.write(content)
+    return jsonify({"filename": f.filename, "total": len(all_r), "active": len(active), "disabled": len(disabled)})
 
 @app.route("/api/analysis/upload-pcap", methods=["POST"])
 def upload_pcap():
@@ -254,11 +319,17 @@ def upload_pcap():
 @app.route("/api/analysis/run", methods=["POST"])
 def run_analysis():
     rp = os.path.join(UPLOAD_DIR, "current.rules")
+    rp_full = os.path.join(UPLOAD_DIR, "current_full.rules")
     pp = os.path.join(UPLOAD_DIR, "current.pcap")
     if not os.path.exists(rp): return jsonify({"error": "No ruleset uploaded."}), 400
     if not os.path.exists(pp): return jsonify({"error": "No PCAP uploaded."}), 400
 
-    with open(rp) as f: rules = parse_rules(f.read())
+    # Parse full ruleset (active + disabled)
+    with open(rp_full if os.path.exists(rp_full) else rp) as f:
+        all_rules, active_rules, disabled_rules = parse_rules_full(f.read())
+
+    # Build flowbit connections
+    fb_conn = build_flowbit_map(all_rules)
 
     ld = os.path.join(UPLOAD_DIR, "suricata-logs")
     if os.path.exists(ld): shutil.rmtree(ld)
@@ -274,21 +345,12 @@ def run_analysis():
         ], capture_output=True, text=True, timeout=600)
         sok = res.returncode == 0
         serr = (res.stderr or "")[-2000:]
-        sout = (res.stdout or "")[-500:]
-        # Save full stderr for debugging
-        with open(os.path.join(ld, "suricata-debug.log"), "w") as dbg:
-            dbg.write("=== STDOUT ===\n")
-            dbg.write(res.stdout or "")
-            dbg.write("\n=== STDERR ===\n")
-            dbg.write(res.stderr or "")
-            dbg.write(f"\n=== RETURN CODE: {res.returncode} ===\n")
     except subprocess.TimeoutExpired:
         return jsonify({"error": "Suricata timed out (10min)"}), 500
     except FileNotFoundError:
         return jsonify({"error": "Suricata not found"}), 500
     elapsed = round(time.time() - t0, 1)
 
-    # Parse alerts from eve.json
     ac = {}
     ep = os.path.join(ld, "eve.json")
     if os.path.exists(ep):
@@ -301,46 +363,43 @@ def run_analysis():
                         ac[sid] = ac.get(sid, 0) + 1
                 except: continue
 
-    # Parse rule profiling (checks/matches from rule_perf.log)
     perf = parse_perf(ld)
-
-    # Load enrichment
     ed = {k: load_cache(k) for k in ["epss", "nuclei", "metasploit", "exploitdb", "kev", "et_rules"]}
 
     scored = []; rc = rv = kc = 0
-    yc = collections.Counter()
-    tc = {"CVE": 0, "MALWARE": 0}
+    yc_total = collections.Counter()
+    yc_cve = collections.Counter()
+    yc_mal = collections.Counter()
+    yc_both = collections.Counter()
+    tc = {"CVE": 0, "MALWARE": 0, "CVE+MALWARE": 0}
 
-    for rule in rules:
+    for rule in active_rules:
         sid = rule["sid"]
         en = enrich_rule(rule, ed["epss"], ed["nuclei"], ed["metasploit"], ed["exploitdb"], ed["kev"], ed["et_rules"])
         alerts = ac.get(sid, 0)
         prof = perf.get(sid, {})
         checks = prof.get("checks", 0)
-        matches = prof.get("matches", 0)
 
         cy2 = get_year(rule)
-        if cy2: yc[cy2] += 1
+        st = rule["sig_type"]
+        tc[st] = tc.get(st, 0) + 1
+        if cy2:
+            yc_total[cy2] += 1
+            if st == "CVE": yc_cve[cy2] += 1
+            elif st == "MALWARE": yc_mal[cy2] += 1
+            else: yc_both[cy2] += 1
 
         if is_cvss(rule):
-            st = "CVE"; tc["CVE"] += 1
             verdict, rd = eval_cvss(rule)
             rs2 = None; rb = None
         else:
-            st = "MALWARE"; tc["MALWARE"] += 1
             rs2, rb = eval_malware(rule, en)
             rd = None
             verdict = "KEEP" if rs2 >= 11 else "REVIEW" if rs2 >= 9 else "RETIRE"
 
-        # KEV or high EPSS: NEVER retire
         if verdict == "RETIRE":
             if en.get("is_kev") or (en.get("epss_score") is not None and en["epss_score"] >= 0.15):
                 verdict = "KEEP"
-
-        # Only RETIRE if the rule appears in the perf log (worst performers)
-        # Rules that meet RETIRE criteria but aren't in perf log → REVIEW
-        if verdict == "RETIRE" and sid not in perf:
-            verdict = "REVIEW"
 
         if verdict == "RETIRE": rc += 1
         elif verdict == "REVIEW": rv += 1
@@ -351,29 +410,54 @@ def run_analysis():
             "classtype": rule["classtype"], "created_at": rule["created_at"],
             "signature_severity": rule["signature_severity"],
             "affected_product": rule["affected_product"],
-            "attack_target": rule["attack_target"], "target_type": rule["target_type"],
+            "target_type": rule["target_type"],
             "performance_impact": rule["performance_impact"],
             "has_pcre": rule["has_pcre"], "tag": rule["tag"],
-            "sig_type": st, "checks": checks, "matches": matches, "alerts": alerts,
+            "sig_type": st, "checks": checks, "alerts": alerts,
             "enrichment": en, "verdict": verdict,
             "rubric_score": rs2, "rubric_breakdown": rb, "rubric_detail": rd,
+            "flowbits": rule["flowbits"],
+            "has_flowbits": rule["has_flowbits"],
+            "flowbit_connections": fb_conn.get(sid, []),
+            "disabled": False,
         })
 
-    order = {"RETIRE": 0, "REVIEW": 1, "KEEP": 2}
+    # Add disabled rules to the list
+    for rule in disabled_rules:
+        scored.append({
+            "sid": rule["sid"], "msg": rule["msg"], "cves": rule["cves"],
+            "classtype": rule["classtype"], "created_at": rule["created_at"],
+            "signature_severity": rule["signature_severity"],
+            "affected_product": rule["affected_product"],
+            "target_type": rule["target_type"],
+            "sig_type": rule["sig_type"], "checks": 0, "alerts": 0,
+            "enrichment": {}, "verdict": "DISABLED",
+            "rubric_score": None, "rubric_breakdown": None, "rubric_detail": None,
+            "flowbits": rule["flowbits"],
+            "has_flowbits": rule["has_flowbits"],
+            "flowbit_connections": fb_conn.get(rule["sid"], []),
+            "disabled": True,
+        })
+
+    order = {"RETIRE": 0, "REVIEW": 1, "KEEP": 2, "DISABLED": 3}
     scored.sort(key=lambda r: (order.get(r["verdict"], 9), r.get("rubric_score") or 0))
 
-    growth = [{"year": y, "count": yc[y]} for y in sorted(yc)]
-    cum = 0
-    for g in growth: cum += g["count"]; g["cumulative"] = cum
+    all_years = sorted(set(list(yc_total.keys()) + list(yc_cve.keys()) + list(yc_mal.keys()) + list(yc_both.keys())))
+    growth = []
+    cum_t = cum_c = cum_m = cum_b = 0
+    for y in all_years:
+        cum_t += yc_total[y]; cum_c += yc_cve[y]; cum_m += yc_mal[y]; cum_b += yc_both[y]
+        growth.append({"year": y, "total": cum_t, "cve": cum_c, "malware": cum_m, "both": cum_b})
 
     return jsonify({
         "summary": {
-            "total_rules": len(rules), "total_alerts": sum(ac.values()),
+            "total_rules": len(all_rules), "active_rules": len(active_rules),
+            "disabled_rules": len(disabled_rules),
+            "total_alerts": sum(ac.values()),
             "suricata_elapsed_sec": elapsed, "suricata_ok": sok,
-            "suricata_errors": serr, "suricata_output": sout,
             "profiled_rules": len(perf),
             "retire_count": rc, "review_count": rv, "keep_count": kc,
-            "kev_hits": sum(1 for r in scored if r["enrichment"]["is_kev"]),
+            "kev_hits": sum(1 for r in scored if r.get("enrichment", {}).get("is_kev")),
             "type_counts": tc, "growth": growth,
         },
         "rules": scored,
